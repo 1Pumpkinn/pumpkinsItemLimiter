@@ -5,3 +5,15 @@ api-version: '1.21'
 load: STARTUP
 authors: [ ___Pumpkinn ]
 description: A minecraft plugin that let's to limit any item in the players inventory
+
+commands:
+  itemlimit:
+    description: Manage item limitations
+    usage: /<command> <add|remove|list|check|clear> [item]
+    permission: pumpkinsItemLimiter.admin
+    aliases: [ il, limititem, itemban ]
+
+permissions:
+  pumpkinsItemLimiter.admin:
+    description: Allows use of admin commands
+    default: op
