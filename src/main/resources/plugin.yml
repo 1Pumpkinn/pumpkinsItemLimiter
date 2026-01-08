@@ -1,0 +1,7 @@
+name: pumpkinsItemLimiter
+version: '1.0-SNAPSHOT'
+main: net.saturn.pumpkinsItemLimiter.PumpkinsItemLimiter
+api-version: '1.21'
+load: STARTUP
+authors: [ ___Pumpkinn ]
+description: A minecraft plugin that let's to limit any item in the players inventory
