@@ -1,3 +1,19 @@
-{
-
-}
+messages:
+  item-banned: "&e{item} &chas been banned!"
+  item-limited-quantity: "&e{item} &climited to &6{quantity}"
+  item-limit-removed: "&e{item} &ais no longer limited!"
+  all-item-limits-removed: "&aAll item limits removed!"
+  item-blocked-pickup-banned: "&cCannot pick up &e{item}&c - it's banned!"
+  item-blocked-pickup-limit: "&cCannot pick up &e{item}&c - at max ({limit})!"
+  item-partial-pickup: "&ePickup limited to &6{amount} &e{item} &7(max: {limit})"
+  item-blocked-take: "&cCannot take &e{item}&c - it's banned!"
+  item-blocked-take-limit: "&cCannot take &e{item}&c - at max ({limit})!"
+  item-blocked-take-partial: "&cCan only take &6{amount} &cmore &e{item} &7(max: {limit})"
+  item-blocked-place-banned: "&cCannot place &e{item}&c - it's banned!"
+  item-blocked-place-limit: "&cAt max &e{item}&c! Press Q to drop."
+  item-blocked-trade-banned: "&cCannot trade for &e{item}&c - it's banned!"
+  item-blocked-trade-limit: "&cCannot trade for &e{item}&c - at max ({limit})!"
+  item-blocked-trade-partial: "&cTrade exceeds limit! Can have &6{remaining} &cmore &e{item} &7(max: {limit})"
+  items-dropped-login: "&eDropped &6{count} &elimited items at your feet!"
+  item-excess-removed: "&cRemoved &e{amount} {item}&c - over limit of {limit}!"
+  item-excess-dropped: "&cDropped &e{amount} {item}&c - over limit!"

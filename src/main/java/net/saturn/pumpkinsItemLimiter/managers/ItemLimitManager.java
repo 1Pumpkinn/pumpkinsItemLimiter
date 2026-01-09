@@ -146,8 +146,9 @@ public class ItemLimitManager {
     public int countItemInInventory(org.bukkit.entity.Player player, Material material) {
         int count = 0;
 
-        // Count in main inventory
-        for (ItemStack item : player.getInventory().getContents()) {
+        // Count in main inventory (slots 0-35: hotbar + main inventory)
+        // Note: getStorageContents() returns only storage slots (0-35), excluding armor and offhand
+        for (ItemStack item : player.getInventory().getStorageContents()) {
             if (item != null && item.getType() == material) {
                 count += item.getAmount();
             }
@@ -188,8 +189,8 @@ public class ItemLimitManager {
         int toDrop = currentCount - limit;
         int dropped = 0;
 
-        // Drop from main inventory
-        for (int i = 0; i < player.getInventory().getSize() && dropped < toDrop; i++) {
+        // Drop from main inventory (slots 0-35: hotbar + main inventory, excluding slot 40 which is offhand)
+        for (int i = 0; i < 36 && dropped < toDrop; i++) {
             ItemStack item = player.getInventory().getItem(i);
             if (item != null && item.getType() == material) {
                 int amount = item.getAmount();
