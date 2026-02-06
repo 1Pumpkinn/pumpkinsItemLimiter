@@ -1,7 +1,7 @@
-package net.saturn.pumpkinsItemLimiter.listeners;
+package net.saturn.itemlimiter.listeners;
 
-import net.saturn.pumpkinsItemLimiter.PumpkinsItemLimiter;
-import net.saturn.pumpkinsItemLimiter.managers.ItemLimitManager;
+import net.saturn.itemlimiter.ItemLimiter;
+import net.saturn.itemlimiter.managers.ItemLimitManager;
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -13,10 +13,10 @@ import org.bukkit.inventory.MerchantInventory;
 
 public class VillagerTradeListener implements Listener {
 
-    private final PumpkinsItemLimiter plugin;
+    private final ItemLimiter plugin;
     private final ItemLimitManager itemLimitManager;
 
-    public VillagerTradeListener(PumpkinsItemLimiter plugin, ItemLimitManager itemLimitManager) {
+    public VillagerTradeListener(ItemLimiter plugin, ItemLimitManager itemLimitManager) {
         this.plugin = plugin;
         this.itemLimitManager = itemLimitManager;
     }

@@ -1,8 +1,9 @@
-package net.saturn.pumpkinsItemLimiter.listeners;
+package net.saturn.itemlimiter.listeners;
 
-import net.saturn.pumpkinsItemLimiter.PumpkinsItemLimiter;
-import net.saturn.pumpkinsItemLimiter.managers.ItemLimitManager;
+import net.saturn.itemlimiter.ItemLimiter;
+import net.saturn.itemlimiter.managers.ItemLimitManager;
 import org.bukkit.Material;
+import org.bukkit.entity.HumanEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -18,11 +19,11 @@ import org.bukkit.scheduler.BukkitRunnable;
 
 public class ItemLimitListener implements Listener {
 
-    private final PumpkinsItemLimiter plugin;
+    private final ItemLimiter plugin;
     private final ItemLimitManager itemLimitManager;
     private BukkitRunnable periodicCheckTask;
 
-    public ItemLimitListener(PumpkinsItemLimiter plugin, ItemLimitManager itemLimitManager) {
+    public ItemLimitListener(ItemLimiter plugin, ItemLimitManager itemLimitManager) {
         this.plugin = plugin;
         this.itemLimitManager = itemLimitManager;
         startPeriodicCheck();
@@ -63,7 +64,44 @@ public class ItemLimitListener implements Listener {
     }
 
     /* ============================================================
-       PICKUP (GROUND → INVENTORY)
+       CRAFTING / SMITHING PREVIEW (Prevent crafting banned items)
+       ============================================================ */
+    @EventHandler
+    public void onPrepareCraft(PrepareItemCraftEvent event) {
+        if (event.getRecipe() == null) return;
+        ItemStack result = event.getRecipe().getResult();
+
+        if (shouldBlockCreation(event.getView().getPlayer(), result)) {
+            event.getInventory().setResult(null);
+        }
+    }
+
+    @EventHandler
+    public void onPrepareSmithing(PrepareSmithingEvent event) {
+        ItemStack result = event.getResult();
+
+        if (shouldBlockCreation(event.getView().getPlayer(), result)) {
+            event.setResult(null);
+        }
+    }
+
+    /* ============================================================
+       CRAFTER BLOCK (1.21)
+       ============================================================ */
+    @EventHandler
+    public void onCrafterCraft(org.bukkit.event.block.CrafterCraftEvent event) {
+        if (event.getRecipe() == null) return;
+        ItemStack result = event.getRecipe().getResult();
+
+        // For automated crafters, we can only enforce strict bans (limit 0)
+        // because there is no player associated with the block event
+        if (itemLimitManager.isItemBanned(result)) {
+            event.setCancelled(true);
+        }
+    }
+
+    /* ============================================================
+       PICKUP (GROUND -> INVENTORY)
        ============================================================ */
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onPickup(EntityPickupItemEvent event) {
@@ -656,6 +694,20 @@ public class ItemLimitListener implements Listener {
                         .replace("{amount}", String.valueOf(added))
                         .replace("{limit}", String.valueOf(limit))
         ));
+    }
+
+    private boolean shouldBlockCreation(HumanEntity human, ItemStack result) {
+        if (result == null || result.getType() == Material.AIR) return false;
+        if (!(human instanceof Player player)) return false;
+
+        if (itemLimitManager.isItemBanned(result)) return true;
+
+        if (itemLimitManager.isItemLimited(result)) {
+            int limit = itemLimitManager.getLimit(result);
+            int current = itemLimitManager.countItemInInventory(player, result.getType());
+            if (current >= limit) return true;
+        }
+        return false;
     }
 
     private String format(Material material) {

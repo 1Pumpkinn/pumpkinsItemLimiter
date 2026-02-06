@@ -1,7 +1,7 @@
-package net.saturn.pumpkinsItemLimiter.command;
+package net.saturn.itemlimiter.command;
 
-import net.saturn.pumpkinsItemLimiter.PumpkinsItemLimiter;
-import net.saturn.pumpkinsItemLimiter.managers.ItemLimitManager;
+import net.saturn.itemlimiter.ItemLimiter;
+import net.saturn.itemlimiter.managers.ItemLimitManager;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.command.Command;
@@ -17,10 +17,10 @@ import java.util.stream.Collectors;
 
 public class ItemLimitCommand implements CommandExecutor, TabCompleter {
 
-    private final PumpkinsItemLimiter plugin;
+    private final ItemLimiter plugin;
     private final ItemLimitManager itemLimitManager;
 
-    public ItemLimitCommand(PumpkinsItemLimiter plugin, ItemLimitManager itemLimitManager) {
+    public ItemLimitCommand(ItemLimiter plugin, ItemLimitManager itemLimitManager) {
         this.plugin = plugin;
         this.itemLimitManager = itemLimitManager;
     }
