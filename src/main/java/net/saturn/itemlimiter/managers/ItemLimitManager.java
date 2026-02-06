@@ -1,6 +1,6 @@
-package net.saturn.pumpkinsItemLimiter.managers;
+package net.saturn.itemlimiter.managers;
 
-import net.saturn.pumpkinsItemLimiter.PumpkinsItemLimiter;
+import net.saturn.itemlimiter.ItemLimiter;
 import org.bukkit.Material;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
@@ -13,12 +13,12 @@ import java.util.stream.Collectors;
 
 public class ItemLimitManager {
 
-    private final PumpkinsItemLimiter plugin;
+    private final ItemLimiter plugin;
     private final Map<Material, Integer> limitedItems; // Material -> max quantity (0 = completely banned)
     private File dataFile;
     private FileConfiguration data;
 
-    public ItemLimitManager(PumpkinsItemLimiter plugin) {
+    public ItemLimitManager(ItemLimiter plugin) {
         this.plugin = plugin;
         this.limitedItems = new HashMap<>();
         this.dataFile = new File(plugin.getDataFolder(), "limited-items.yml");

@@ -1,12 +1,12 @@
-package net.saturn.pumpkinsItemLimiter;
+package net.saturn.itemlimiter;
 
-import net.saturn.pumpkinsItemLimiter.command.ItemLimitCommand;
-import net.saturn.pumpkinsItemLimiter.listeners.ItemLimitListener;
-import net.saturn.pumpkinsItemLimiter.listeners.VillagerTradeListener;
-import net.saturn.pumpkinsItemLimiter.managers.ItemLimitManager;
+import net.saturn.itemlimiter.command.ItemLimitCommand;
+import net.saturn.itemlimiter.listeners.ItemLimitListener;
+import net.saturn.itemlimiter.listeners.VillagerTradeListener;
+import net.saturn.itemlimiter.managers.ItemLimitManager;
 import org.bukkit.plugin.java.JavaPlugin;
 
-public final class PumpkinsItemLimiter extends JavaPlugin {
+public final class ItemLimiter extends JavaPlugin {
 
     private ItemLimitManager itemLimitManager;
 

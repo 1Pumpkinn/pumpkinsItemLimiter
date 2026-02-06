@@ -1,6 +1,6 @@
-name: pumpkinsItemLimiter
+name: ItemLimiter
 version: '1.1-SNAPSHOT'
-main: net.saturn.pumpkinsItemLimiter.PumpkinsItemLimiter
+main: net.saturn.itemlimiter.ItemLimiter
 api-version: '1.21'
 load: STARTUP
 authors: [ ___Pumpkinn ]
@@ -10,10 +10,10 @@ commands:
   itemlimit:
     description: Manage item limitations
     usage: /<command> <add|remove|list|check|clear> [item]
-    permission: pumpkinsItemLimiter.admin
+    permission: itemlimiter.admin
     aliases: [ il, limititem, itemban ]
 
 permissions:
-  pumpkinsItemLimiter.admin:
+  itemlimiter.admin:
     description: Allows use of admin commands
     default: op
