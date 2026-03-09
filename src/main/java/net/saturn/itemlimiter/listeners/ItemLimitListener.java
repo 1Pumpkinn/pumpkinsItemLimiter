@@ -8,20 +8,29 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
+import org.bukkit.event.block.CrafterCraftEvent;
 import org.bukkit.event.entity.EntityPickupItemEvent;
 import org.bukkit.event.inventory.*;
 import org.bukkit.event.player.PlayerDropItemEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
+import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerSwapHandItemsEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.scheduler.BukkitRunnable;
+
+import java.util.HashMap;
+import java.util.Map;
+import java.util.UUID;
 
 public class ItemLimitListener implements Listener {
 
     private final ItemLimiter plugin;
     private final ItemLimitManager itemLimitManager;
     private BukkitRunnable periodicCheckTask;
+    private final Map<UUID, Long> pickupCooldowns = new HashMap<>();
+    private final Map<UUID, Long> partialCooldowns = new HashMap<>();
+    private final Map<UUID, Long> blockedCooldowns = new HashMap<>();
 
     public ItemLimitListener(ItemLimiter plugin, ItemLimitManager itemLimitManager) {
         this.plugin = plugin;
@@ -64,8 +73,20 @@ public class ItemLimitListener implements Listener {
     }
 
     /* ============================================================
-       CRAFTING / SMITHING PREVIEW (Prevent crafting banned items)
+       CRAFTER BLOCK (1.21)
        ============================================================ */
+    @EventHandler
+    public void onCrafterCraft(CrafterCraftEvent event) {
+        if (event.getRecipe() == null) return;
+        ItemStack result = event.getRecipe().getResult();
+
+        // For automated crafters, we enforce limits based on the block itself.
+        // If the item is banned (limit 0) or limited, we block the craft to 
+        // prevent automated generation of restricted items.
+        if (itemLimitManager.isItemLimited(result)) {
+            event.setCancelled(true);
+        }
+    }
     @EventHandler
     public void onPrepareCraft(PrepareItemCraftEvent event) {
         if (event.getRecipe() == null) return;
@@ -86,21 +107,6 @@ public class ItemLimitListener implements Listener {
     }
 
     /* ============================================================
-       CRAFTER BLOCK (1.21)
-       ============================================================ */
-    @EventHandler
-    public void onCrafterCraft(org.bukkit.event.block.CrafterCraftEvent event) {
-        if (event.getRecipe() == null) return;
-        ItemStack result = event.getRecipe().getResult();
-
-        // For automated crafters, we can only enforce strict bans (limit 0)
-        // because there is no player associated with the block event
-        if (itemLimitManager.isItemBanned(result)) {
-            event.setCancelled(true);
-        }
-    }
-
-    /* ============================================================
        PICKUP (GROUND -> INVENTORY)
        ============================================================ */
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
@@ -117,7 +123,7 @@ public class ItemLimitListener implements Listener {
         // If banned, cancel pickup
         if (limit == 0) {
             event.setCancelled(true);
-            sendBlockedMessage(player, material, limit);
+            sendPickupBlockedMessage(player, material, limit);
             return;
         }
 
@@ -128,14 +134,45 @@ public class ItemLimitListener implements Listener {
         // If already at or over limit, cancel the pickup
         if (current >= limit) {
             event.setCancelled(true);
-            sendBlockedMessage(player, material, limit);
+            sendPickupBlockedMessage(player, material, limit);
             return;
         }
 
-        // If picking up would exceed limit, cancel the pickup
+        // If picking up would exceed limit, handle partial pickup
         if (totalAfterPickup > limit) {
+            int canAdd = limit - current;
+            if (canAdd <= 0) {
+                event.setCancelled(true);
+                sendPickupBlockedMessage(player, material, limit);
+                return;
+            }
+
             event.setCancelled(true);
-            sendBlockedMessage(player, material, limit);
+
+            ItemStack toAdd = stack.clone();
+            toAdd.setAmount(canAdd);
+            Map<Integer, ItemStack> leftovers = player.getInventory().addItem(toAdd);
+
+            int leftoverAmount = leftovers.values().stream().mapToInt(ItemStack::getAmount).sum();
+            int actuallyAdded = canAdd - leftoverAmount;
+
+            if (actuallyAdded <= 0) {
+                sendPickupBlockedMessage(player, material, limit);
+                return;
+            }
+
+            int remaining = stack.getAmount() - actuallyAdded;
+            if (remaining <= 0) {
+                event.getItem().remove();
+            } else {
+                ItemStack newStack = stack.clone();
+                newStack.setAmount(remaining);
+                event.getItem().setItemStack(newStack);
+            }
+
+            player.updateInventory();
+            sendPartialMessage(player, material, actuallyAdded, limit);
+            return;
         }
         // If totalAfterPickup <= limit, allow the pickup (don't cancel event)
     }
@@ -535,22 +572,14 @@ public class ItemLimitListener implements Listener {
             @Override
             public void run() {
                 if (!player.isOnline()) return;
-
-                int dropped = 0;
-                for (Material mat : itemLimitManager.getLimitedItems().keySet()) {
-                    dropped += itemLimitManager.dropExcess(player, mat);
-                }
-
-                if (dropped > 0) {
-                    player.sendMessage(colorize(
-                            plugin.getConfig().getString(
-                                    "messages.items-dropped-login",
-                                    "&eDropped &6{count} &elimited items at your feet!"
-                            ).replace("{count}", String.valueOf(dropped))
-                    ));
-                }
+                checkAndDropAllExcess(player);
             }
         }.runTaskLater(plugin, 20L);
+    }
+
+    @EventHandler
+    public void onQuit(PlayerQuitEvent event) {
+        pickupCooldowns.remove(event.getPlayer().getUniqueId());
     }
 
     /* ============================================================
@@ -671,7 +700,31 @@ public class ItemLimitListener implements Listener {
         }
     }
 
+    private void sendPickupBlockedMessage(Player player, Material material, int limit) {
+        long now = System.currentTimeMillis();
+        long last = pickupCooldowns.getOrDefault(player.getUniqueId(), 0L);
+
+        if (now - last >= 60000) {
+            pickupCooldowns.put(player.getUniqueId(), now);
+            String key = limit == 0 ? "messages.item-blocked-pickup-banned" : "messages.item-blocked-pickup-limit";
+            String def = limit == 0
+                    ? "&cCannot pick up &e{item}&c - it's banned!"
+                    : "&cCannot pick up &e{item}&c - at max ({limit})!";
+            player.sendMessage(colorize(
+                    plugin.getConfig().getString(key, def)
+                            .replace("{item}", format(material))
+                            .replace("{limit}", String.valueOf(limit))
+            ));
+        }
+    }
+
     private void sendBlockedMessage(Player player, Material material, int limit) {
+        long now = System.currentTimeMillis();
+        long last = blockedCooldowns.getOrDefault(player.getUniqueId(), 0L);
+        if (now - last < 60000) {
+            return;
+        }
+        blockedCooldowns.put(player.getUniqueId(), now);
         player.sendMessage(colorize(
                 plugin.getConfig().getString(
                                 limit == 0
@@ -685,15 +738,12 @@ public class ItemLimitListener implements Listener {
     }
 
     private void sendPartialMessage(Player player, Material material, int added, int limit) {
-        player.sendMessage(colorize(
-                plugin.getConfig().getString(
-                                "messages.item-partial-pickup",
-                                "&eAdded &6{amount} &e{item} &7(max: {limit})"
-                        )
-                        .replace("{item}", format(material))
-                        .replace("{amount}", String.valueOf(added))
-                        .replace("{limit}", String.valueOf(limit))
-        ));
+        long now = System.currentTimeMillis();
+        long last = partialCooldowns.getOrDefault(player.getUniqueId(), 0L);
+        if (now - last < 60000) {
+            return;
+        }
+        partialCooldowns.put(player.getUniqueId(), now);
     }
 
     private boolean shouldBlockCreation(HumanEntity human, ItemStack result) {
