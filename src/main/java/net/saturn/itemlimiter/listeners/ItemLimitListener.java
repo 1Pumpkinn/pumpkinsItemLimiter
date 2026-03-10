@@ -175,6 +175,14 @@ public class ItemLimitListener implements Listener {
             return;
         }
         // If totalAfterPickup <= limit, allow the pickup (don't cancel event)
+        if (itemLimitManager.isItemLimited(stack.getType())) {
+            if (itemLimitManager.countItemInInventory(player, stack.getType()) + stack.getAmount() > limit) {
+                int excess = itemLimitManager.countItemInInventory(player, stack.getType()) + stack.getAmount() - limit;
+                ItemStack toDrop = stack.clone();
+                toDrop.setAmount(excess);
+                player.getWorld().dropItem(player.getLocation(), toDrop);
+            }
+        }
     }
 
     /* ============================================================
@@ -693,7 +701,7 @@ public class ItemLimitListener implements Listener {
             player.sendMessage(colorize(
                     plugin.getConfig().getString(
                             "messages.items-dropped-excess-all",
-                            "&eDropped &6{count} &eexcess limited items at your feet!"
+                            "&eDropped &6{count} &eexcess limited items!"
                     ).replace("{count}", String.valueOf(totalDropped))
             ));
             player.updateInventory();
