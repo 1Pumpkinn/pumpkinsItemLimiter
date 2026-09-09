@@ -266,48 +266,21 @@ public class ItemLimitManager {
                 continue;
             }
 
-            if (nested && isBundle(item.getType()) && item.getItemMeta() instanceof BundleMeta bundleMeta) {
-                if (!bundleMeta.hasItems()) continue;
-                List<ItemStack> bundleContents = new ArrayList<>(bundleMeta.getItems());
-                for (int j = bundleContents.size() - 1; j >= 0 && dropped < toDrop; j--) {
-                    ItemStack bundled = bundleContents.get(j);
-                    if (bundled == null || bundled.getType() != material) continue;
-                    int amount = bundled.getAmount();
-                    int canDrop = Math.min(amount, toDrop - dropped);
-                    if (canDrop >= amount) {
-                        bundleContents.remove(j);
-                    } else {
-                        bundled.setAmount(amount - canDrop);
-                        bundleContents.set(j, bundled);
-                    }
-                    player.getWorld().dropItemNaturally(player.getLocation(), new ItemStack(material, canDrop));
+            if (nested && isBundle(item.getType())) {
+                int canDrop = dropFromBundle(item, material, toDrop - dropped, player);
+                if (canDrop > 0) {
+                    player.getInventory().setItem(i, item);
                     dropped += canDrop;
                 }
-                bundleMeta.setItems(bundleContents);
-                item.setItemMeta(bundleMeta);
-                player.getInventory().setItem(i, item);
                 continue;
             }
 
-            if (nested && isShulkerBox(item.getType()) && item.getItemMeta() instanceof BlockStateMeta blockMeta) {
-                if (!(blockMeta.getBlockState() instanceof ShulkerBox shulkerBox)) continue;
-                ItemStack[] contents = shulkerBox.getInventory().getContents();
-                for (int j = 0; j < contents.length && dropped < toDrop; j++) {
-                    if (contents[j] == null || contents[j].getType() != material) continue;
-                    int amount = contents[j].getAmount();
-                    int canDrop = Math.min(amount, toDrop - dropped);
-                    if (canDrop >= amount) {
-                        contents[j] = null;
-                    } else {
-                        contents[j].setAmount(amount - canDrop);
-                    }
-                    player.getWorld().dropItemNaturally(player.getLocation(), new ItemStack(material, canDrop));
+            if (nested && isShulkerBox(item.getType())) {
+                int canDrop = dropFromShulker(item, material, toDrop - dropped, player);
+                if (canDrop > 0) {
+                    player.getInventory().setItem(i, item);
                     dropped += canDrop;
                 }
-                shulkerBox.getInventory().setContents(contents);
-                blockMeta.setBlockState(shulkerBox);
-                item.setItemMeta(blockMeta);
-                player.getInventory().setItem(i, item);
             }
         }
 
@@ -347,6 +320,127 @@ public class ItemLimitManager {
                 }
                 dropped += canDrop;
             }
+        }
+
+        return dropped;
+    }
+
+    /**
+     * Recursively drops matching items out of a bundle's contents, descending
+     * into any bundles or shulker boxes nested inside it. Mutates the given
+     * bundle ItemStack's meta in place. Returns the number of items dropped.
+     */
+    private int dropFromBundle(ItemStack bundleItem, Material material, int toDrop, org.bukkit.entity.Player player) {
+        if (toDrop <= 0 || !(bundleItem.getItemMeta() instanceof BundleMeta bundleMeta) || !bundleMeta.hasItems()) {
+            return 0;
+        }
+
+        List<ItemStack> contents = new ArrayList<>(bundleMeta.getItems());
+        int dropped = 0;
+        boolean changed = false;
+
+        for (int j = contents.size() - 1; j >= 0 && dropped < toDrop; j--) {
+            ItemStack inner = contents.get(j);
+            if (inner == null || inner.getType() == Material.AIR) continue;
+
+            if (inner.getType() == material) {
+                int amount = inner.getAmount();
+                int canDrop = Math.min(amount, toDrop - dropped);
+                if (canDrop >= amount) {
+                    contents.remove(j);
+                } else {
+                    inner.setAmount(amount - canDrop);
+                    contents.set(j, inner);
+                }
+                player.getWorld().dropItemNaturally(player.getLocation(), new ItemStack(material, canDrop));
+                dropped += canDrop;
+                changed = true;
+                continue;
+            }
+
+            if (isBundle(inner.getType())) {
+                int canDrop = dropFromBundle(inner, material, toDrop - dropped, player);
+                if (canDrop > 0) {
+                    contents.set(j, inner);
+                    dropped += canDrop;
+                    changed = true;
+                }
+            } else if (isShulkerBox(inner.getType())) {
+                int canDrop = dropFromShulker(inner, material, toDrop - dropped, player);
+                if (canDrop > 0) {
+                    contents.set(j, inner);
+                    dropped += canDrop;
+                    changed = true;
+                }
+            }
+        }
+
+        if (changed) {
+            bundleMeta.setItems(contents);
+            bundleItem.setItemMeta(bundleMeta);
+        }
+
+        return dropped;
+    }
+
+    /**
+     * Recursively drops matching items out of a shulker box's contents,
+     * descending into any bundles or shulker boxes nested inside it. Mutates
+     * the given shulker box ItemStack's meta in place. Returns the number of
+     * items dropped.
+     */
+    private int dropFromShulker(ItemStack shulkerItem, Material material, int toDrop, org.bukkit.entity.Player player) {
+        if (toDrop <= 0 || !(shulkerItem.getItemMeta() instanceof BlockStateMeta blockMeta)) {
+            return 0;
+        }
+        if (!(blockMeta.getBlockState() instanceof ShulkerBox shulkerBox)) {
+            return 0;
+        }
+
+        ItemStack[] contents = shulkerBox.getInventory().getContents();
+        int dropped = 0;
+        boolean changed = false;
+
+        for (int j = 0; j < contents.length && dropped < toDrop; j++) {
+            ItemStack inner = contents[j];
+            if (inner == null || inner.getType() == Material.AIR) continue;
+
+            if (inner.getType() == material) {
+                int amount = inner.getAmount();
+                int canDrop = Math.min(amount, toDrop - dropped);
+                if (canDrop >= amount) {
+                    contents[j] = null;
+                } else {
+                    inner.setAmount(amount - canDrop);
+                    contents[j] = inner;
+                }
+                player.getWorld().dropItemNaturally(player.getLocation(), new ItemStack(material, canDrop));
+                dropped += canDrop;
+                changed = true;
+                continue;
+            }
+
+            if (isBundle(inner.getType())) {
+                int canDrop = dropFromBundle(inner, material, toDrop - dropped, player);
+                if (canDrop > 0) {
+                    contents[j] = inner;
+                    dropped += canDrop;
+                    changed = true;
+                }
+            } else if (isShulkerBox(inner.getType())) {
+                int canDrop = dropFromShulker(inner, material, toDrop - dropped, player);
+                if (canDrop > 0) {
+                    contents[j] = inner;
+                    dropped += canDrop;
+                    changed = true;
+                }
+            }
+        }
+
+        if (changed) {
+            shulkerBox.getInventory().setContents(contents);
+            blockMeta.setBlockState(shulkerBox);
+            shulkerItem.setItemMeta(blockMeta);
         }
 
         return dropped;
