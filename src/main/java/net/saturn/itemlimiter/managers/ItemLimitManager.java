@@ -28,6 +28,8 @@ public class ItemLimitManager {
     }
 
     public void load() {
+        limitedItems.clear();
+
         if (!dataFile.exists()) {
             try {
                 dataFile.getParentFile().mkdirs();
@@ -144,33 +146,48 @@ public class ItemLimitManager {
     }
 
     /**
+     * Whether items nested inside bundles/shulker boxes count toward limits.
+     * Backed by config.yml so it can be toggled live via /itemlimit nested.
+     */
+    public boolean isLimitNestedContainers() {
+        return plugin.getConfig().getBoolean("settings.limit-nested-containers", true);
+    }
+
+    public void setLimitNestedContainers(boolean value) {
+        plugin.getConfig().set("settings.limit-nested-containers", value);
+        plugin.saveConfig();
+    }
+
+    /**
      * Counts how many of a specific material a player has across their entire
-     * inventory, including items nested inside bundles and shulker boxes.
+     * inventory, including items nested inside bundles and shulker boxes
+     * (unless nested-container limiting has been disabled).
      */
     public int countItemInInventory(org.bukkit.entity.Player player, Material material) {
+        boolean nested = isLimitNestedContainers();
         int count = 0;
 
         // Count in main inventory (slots 0-35: hotbar + main inventory)
         for (ItemStack item : player.getInventory().getStorageContents()) {
-            count += countItemInStack(item, material);
+            count += countItemInStack(item, material, nested);
         }
 
         // Count in armor slots
         for (ItemStack item : player.getInventory().getArmorContents()) {
-            count += countItemInStack(item, material);
+            count += countItemInStack(item, material, nested);
         }
 
         // Count in off-hand
-        count += countItemInStack(player.getInventory().getItemInOffHand(), material);
+        count += countItemInStack(player.getInventory().getItemInOffHand(), material, nested);
 
         return count;
     }
 
     /**
      * Recursively counts how many of a specific material are in an ItemStack,
-     * looking inside bundles and shulker boxes.
+     * looking inside bundles and shulker boxes when nested is true.
      */
-    private int countItemInStack(ItemStack item, Material material) {
+    private int countItemInStack(ItemStack item, Material material, boolean nested) {
         if (item == null || item.getType() == Material.AIR) return 0;
 
         int count = 0;
@@ -180,11 +197,13 @@ public class ItemLimitManager {
             count += item.getAmount();
         }
 
+        if (!nested) return count;
+
         // Recurse into bundles
         if (item.getType() == Material.BUNDLE && item.getItemMeta() instanceof BundleMeta bundleMeta) {
             if (bundleMeta.hasItems()) {
                 for (ItemStack bundled : bundleMeta.getItems()) {
-                    count += countItemInStack(bundled, material);
+                    count += countItemInStack(bundled, material, true);
                 }
             }
         }
@@ -193,7 +212,7 @@ public class ItemLimitManager {
         if (isShulkerBox(item.getType()) && item.getItemMeta() instanceof BlockStateMeta blockMeta) {
             if (blockMeta.getBlockState() instanceof ShulkerBox shulkerBox) {
                 for (ItemStack contained : shulkerBox.getInventory().getContents()) {
-                    count += countItemInStack(contained, material);
+                    count += countItemInStack(contained, material, true);
                 }
             }
         }
@@ -224,6 +243,7 @@ public class ItemLimitManager {
 
         int toDrop = currentCount - limit;
         int dropped = 0;
+        boolean nested = isLimitNestedContainers();
 
         // Drop from main inventory (slots 0-35)
         for (int i = 0; i < 36 && dropped < toDrop; i++) {
@@ -248,7 +268,7 @@ public class ItemLimitManager {
             }
 
             // Strip excess from bundles
-            if (item.getType() == Material.BUNDLE && item.getItemMeta() instanceof BundleMeta bundleMeta) {
+            if (nested && item.getType() == Material.BUNDLE && item.getItemMeta() instanceof BundleMeta bundleMeta) {
                 if (!bundleMeta.hasItems()) continue;
                 List<ItemStack> bundleContents = new ArrayList<>(bundleMeta.getItems());
                 for (int j = bundleContents.size() - 1; j >= 0 && dropped < toDrop; j--) {
@@ -272,7 +292,7 @@ public class ItemLimitManager {
             }
 
             // Strip excess from shulker boxes
-            if (isShulkerBox(item.getType()) && item.getItemMeta() instanceof BlockStateMeta blockMeta) {
+            if (nested && isShulkerBox(item.getType()) && item.getItemMeta() instanceof BlockStateMeta blockMeta) {
                 if (!(blockMeta.getBlockState() instanceof ShulkerBox shulkerBox)) continue;
                 ItemStack[] contents = shulkerBox.getInventory().getContents();
                 for (int j = 0; j < contents.length && dropped < toDrop; j++) {

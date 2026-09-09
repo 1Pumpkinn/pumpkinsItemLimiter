@@ -171,7 +171,7 @@ public class ItemLimitListener implements Listener {
             }
 
             player.updateInventory();
-            sendPartialMessage(player, material, actuallyAdded, limit);
+            sendPartialMessage(player, material, actuallyAdded, limit, true);
             return;
         }
         // If totalAfterPickup <= limit, allow the pickup (don't cancel event)
@@ -746,12 +746,27 @@ public class ItemLimitListener implements Listener {
     }
 
     private void sendPartialMessage(Player player, Material material, int added, int limit) {
+        sendPartialMessage(player, material, added, limit, false);
+    }
+
+    private void sendPartialMessage(Player player, Material material, int added, int limit, boolean isPickup) {
         long now = System.currentTimeMillis();
         long last = partialCooldowns.getOrDefault(player.getUniqueId(), 0L);
         if (now - last < 60000) {
             return;
         }
         partialCooldowns.put(player.getUniqueId(), now);
+
+        String key = isPickup ? "messages.item-partial-pickup" : "messages.item-blocked-take-partial";
+        String def = isPickup
+                ? "&ePickup limited to &6{amount} &e{item} &7(max: {limit})"
+                : "&cCan only take &6{amount} &cmore &e{item} &7(max: {limit})";
+        player.sendMessage(colorize(
+                plugin.getConfig().getString(key, def)
+                        .replace("{amount}", String.valueOf(added))
+                        .replace("{item}", format(material))
+                        .replace("{limit}", String.valueOf(limit))
+        ));
     }
 
     private boolean shouldBlockCreation(HumanEntity human, ItemStack result) {

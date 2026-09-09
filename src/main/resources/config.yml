@@ -1,3 +1,10 @@
+settings:
+  # If true, items nested inside bundles and shulker boxes count toward a
+  # player's limit. If false, only items sitting directly in the inventory
+  # (including armor/off-hand) are counted - containers are ignored.
+  # Can be toggled in-game with /itemlimit nested <on|off>.
+  limit-nested-containers: true
+
 messages:
   item-banned: "&e{item} &chas been banned!"
   item-limited-quantity: "&e{item} &climited to &6{quantity}"

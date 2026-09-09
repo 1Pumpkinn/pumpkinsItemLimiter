@@ -8,9 +8,11 @@ import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.command.TabCompleter;
+import org.bukkit.entity.Player;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -27,7 +29,7 @@ public class ItemLimitCommand implements CommandExecutor, TabCompleter {
 
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
-        if (!sender.hasPermission("BetterCombatLogging.admin")) {
+        if (!sender.hasPermission("itemlimiter.admin")) {
             sender.sendMessage(colorize("&cYou don't have permission to use this command!"));
             return true;
         }
@@ -50,6 +52,12 @@ public class ItemLimitCommand implements CommandExecutor, TabCompleter {
                 return handleClear(sender);
             case "check":
                 return handleCheck(sender, args);
+            case "nested":
+                return handleNested(sender, args);
+            case "reload":
+                return handleReload(sender);
+            case "info":
+                return handleInfo(sender, args);
             default:
                 sendHelp(sender);
                 return true;
@@ -65,13 +73,25 @@ public class ItemLimitCommand implements CommandExecutor, TabCompleter {
             return true;
         }
 
-        String itemName = args[1].toUpperCase();
-        Material material;
+        // The quantity, if given, is always the last argument. Everything between
+        // "add" and the quantity (or the end, if no quantity) is the item name,
+        // so multi-word names like "golden apple" work without underscores.
+        int itemEnd = args.length;
+        Integer parsedQuantity = null;
+        if (args.length >= 3) {
+            try {
+                parsedQuantity = Integer.parseInt(args[args.length - 1]);
+                itemEnd = args.length - 1;
+            } catch (NumberFormatException ignored) {
+                // Last token isn't a number, so treat the whole remainder as the item name.
+            }
+        }
 
-        try {
-            material = Material.valueOf(itemName);
-        } catch (IllegalArgumentException e) {
-            sender.sendMessage(colorize("&cInvalid item: &e" + args[1]));
+        String rawName = String.join(" ", Arrays.copyOfRange(args, 1, itemEnd));
+        Material material = parseMaterial(rawName);
+
+        if (material == null) {
+            sender.sendMessage(colorize("&cInvalid item: &e" + rawName));
             sender.sendMessage(colorize("&7Use tab completion or check the Minecraft wiki for valid item names."));
             return true;
         }
@@ -82,16 +102,9 @@ public class ItemLimitCommand implements CommandExecutor, TabCompleter {
         }
 
         // Default to 0 (banned) if no quantity specified
-        int maxQuantity = 0;
+        int maxQuantity = parsedQuantity != null ? parsedQuantity : 0;
 
-        if (args.length >= 3) {
-            try {
-                maxQuantity = Integer.parseInt(args[2]);
-            } catch (NumberFormatException e) {
-                sender.sendMessage(colorize("&cInvalid quantity! Must be a number."));
-                return true;
-            }
-
+        if (parsedQuantity != null) {
             if (maxQuantity < 0) {
                 sender.sendMessage(colorize("&cQuantity cannot be negative!"));
                 return true;
@@ -136,13 +149,11 @@ public class ItemLimitCommand implements CommandExecutor, TabCompleter {
             return true;
         }
 
-        String itemName = args[1].toUpperCase();
-        Material material;
+        String rawName = String.join(" ", Arrays.copyOfRange(args, 1, args.length));
+        Material material = parseMaterial(rawName);
 
-        try {
-            material = Material.valueOf(itemName);
-        } catch (IllegalArgumentException e) {
-            sender.sendMessage(colorize("&cInvalid item: &e" + args[1]));
+        if (material == null) {
+            sender.sendMessage(colorize("&cInvalid item: &e" + rawName));
             return true;
         }
 
@@ -250,13 +261,11 @@ public class ItemLimitCommand implements CommandExecutor, TabCompleter {
             return true;
         }
 
-        String itemName = args[1].toUpperCase();
-        Material material;
+        String rawName = String.join(" ", Arrays.copyOfRange(args, 1, args.length));
+        Material material = parseMaterial(rawName);
 
-        try {
-            material = Material.valueOf(itemName);
-        } catch (IllegalArgumentException e) {
-            sender.sendMessage(colorize("&cInvalid item: &e" + args[1]));
+        if (material == null) {
+            sender.sendMessage(colorize("&cInvalid item: &e" + rawName));
             return true;
         }
 
@@ -276,6 +285,86 @@ public class ItemLimitCommand implements CommandExecutor, TabCompleter {
         return true;
     }
 
+    private boolean handleNested(CommandSender sender, String[] args) {
+        if (args.length < 2) {
+            boolean current = itemLimitManager.isLimitNestedContainers();
+            sender.sendMessage(colorize("&cUsage: /itemlimit nested <on|off>"));
+            sender.sendMessage(colorize("&7Currently: " + (current ? "&aON &7(items in bundles/shulker boxes count)" : "&cOFF &7(only top-level inventory items count)")));
+            return true;
+        }
+
+        String state = args[1].toLowerCase();
+        boolean value;
+        if (state.equals("on") || state.equals("true") || state.equals("enable")) {
+            value = true;
+        } else if (state.equals("off") || state.equals("false") || state.equals("disable")) {
+            value = false;
+        } else {
+            sender.sendMessage(colorize("&cUsage: /itemlimit nested <on|off>"));
+            return true;
+        }
+
+        itemLimitManager.setLimitNestedContainers(value);
+
+        if (value) {
+            sender.sendMessage(colorize("&aItems inside bundles and shulker boxes now count toward limits."));
+        } else {
+            sender.sendMessage(colorize("&eItems inside bundles and shulker boxes no longer count toward limits."));
+            sender.sendMessage(colorize("&7Only items sitting directly in a player's inventory/armor/off-hand are limited."));
+        }
+
+        return true;
+    }
+
+    private boolean handleReload(CommandSender sender) {
+        plugin.reloadConfig();
+        itemLimitManager.load();
+        sender.sendMessage(colorize("&aReloaded config.yml and limited-items.yml!"));
+        return true;
+    }
+
+    private boolean handleInfo(CommandSender sender, String[] args) {
+        if (args.length < 2) {
+            sender.sendMessage(colorize("&cUsage: /itemlimit info <player>"));
+            return true;
+        }
+
+        Player target = Bukkit.getPlayer(args[1]);
+        if (target == null) {
+            sender.sendMessage(colorize("&cPlayer not found or not online: &e" + args[1]));
+            return true;
+        }
+
+        Map<Material, Integer> limitedItems = itemLimitManager.getLimitedItems();
+        if (limitedItems.isEmpty()) {
+            sender.sendMessage(colorize("&eNo items are currently limited."));
+            return true;
+        }
+
+        sender.sendMessage(colorize("&6&m----------&r &e&lLimits for " + target.getName() + " &6&m----------"));
+
+        boolean any = false;
+        List<Material> sorted = new ArrayList<>(limitedItems.keySet());
+        sorted.sort(Comparator.comparing(Material::name));
+
+        for (Material material : sorted) {
+            int count = itemLimitManager.countItemInInventory(target, material);
+            if (count <= 0) continue;
+
+            any = true;
+            int limit = limitedItems.get(material);
+            String status = limit == 0 ? "&c[BANNED]" : (count >= limit ? "&c[AT MAX]" : "&a[OK]");
+            sender.sendMessage(colorize("&8• &e" + formatMaterialName(material) + " &7- " + count + "/" + limit + " " + status));
+        }
+
+        if (!any) {
+            sender.sendMessage(colorize("&7" + target.getName() + " has none of the limited items."));
+        }
+
+        sender.sendMessage(colorize("&6&m---------------------------------------"));
+        return true;
+    }
+
     private void sendHelp(CommandSender sender) {
         sender.sendMessage(colorize("&6&m----------&r &e&lItem Limiter &6&m----------"));
         sender.sendMessage(colorize("&e/itemlimit add <item> [quantity] &7- Limit an item"));
@@ -286,7 +375,23 @@ public class ItemLimitCommand implements CommandExecutor, TabCompleter {
         sender.sendMessage(colorize("&e/itemlimit list [page] &7- List all limited items"));
         sender.sendMessage(colorize("&e/itemlimit check <item> &7- Check if item is limited"));
         sender.sendMessage(colorize("&e/itemlimit clear &7- Clear all limited items"));
+        sender.sendMessage(colorize("&e/itemlimit nested <on|off> &7- Toggle limiting items inside bundles/shulker boxes"));
+        sender.sendMessage(colorize("&e/itemlimit info <player> &7- Show a player's current counts of limited items"));
+        sender.sendMessage(colorize("&e/itemlimit reload &7- Reload config.yml and limited-items.yml"));
         sender.sendMessage(colorize("&6&m---------------------------------------"));
+    }
+
+    /**
+     * Resolves user-typed item names to a Material, accepting friendly forms
+     * like "golden apple" or "golden-apple" in addition to "GOLDEN_APPLE".
+     */
+    private Material parseMaterial(String rawName) {
+        String normalized = rawName.trim().replace(' ', '_').replace('-', '_').toUpperCase();
+        try {
+            return Material.valueOf(normalized);
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
     }
 
     private String formatMaterialName(Material material) {
@@ -314,7 +419,7 @@ public class ItemLimitCommand implements CommandExecutor, TabCompleter {
         List<String> completions = new ArrayList<>();
 
         if (args.length == 1) {
-            completions.addAll(Arrays.asList("add", "remove", "list", "check", "clear"));
+            completions.addAll(Arrays.asList("add", "remove", "list", "check", "clear", "nested", "info", "reload"));
         } else if (args.length == 2) {
             if (args[0].equalsIgnoreCase("add") || args[0].equalsIgnoreCase("check")) {
                 completions.addAll(Arrays.stream(Material.values())
@@ -329,6 +434,10 @@ public class ItemLimitCommand implements CommandExecutor, TabCompleter {
                 for (int i = 1; i <= Math.min(totalPages, 5); i++) {
                     completions.add(String.valueOf(i));
                 }
+            } else if (args[0].equalsIgnoreCase("nested")) {
+                completions.addAll(Arrays.asList("on", "off"));
+            } else if (args[0].equalsIgnoreCase("info")) {
+                Bukkit.getOnlinePlayers().forEach(p -> completions.add(p.getName()));
             }
         } else if (args.length == 3 && args[0].equalsIgnoreCase("add")) {
             // Suggest common quantities
