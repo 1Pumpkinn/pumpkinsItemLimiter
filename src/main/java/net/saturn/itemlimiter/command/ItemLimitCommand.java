@@ -2,6 +2,7 @@ package net.saturn.itemlimiter.command;
 
 import net.saturn.itemlimiter.ItemLimiter;
 import net.saturn.itemlimiter.managers.ItemLimitManager;
+import net.saturn.itemlimiter.util.ItemNameFormatter;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.command.Command;
@@ -395,23 +396,11 @@ public class ItemLimitCommand implements CommandExecutor, TabCompleter {
     }
 
     private String formatMaterialName(Material material) {
-        String name = material.name().replace("_", " ");
-        String[] words = name.split(" ");
-        StringBuilder formatted = new StringBuilder();
-
-        for (String word : words) {
-            if (formatted.length() > 0) {
-                formatted.append(" ");
-            }
-            formatted.append(word.substring(0, 1).toUpperCase())
-                    .append(word.substring(1).toLowerCase());
-        }
-
-        return formatted.toString();
+        return ItemNameFormatter.format(material);
     }
 
     private String colorize(String message) {
-        return net.md_5.bungee.api.ChatColor.translateAlternateColorCodes('&', message);
+        return ItemNameFormatter.colorize(message);
     }
 
     @Override

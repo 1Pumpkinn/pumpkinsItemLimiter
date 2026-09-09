@@ -72,9 +72,7 @@ public class ItemLimitListener implements Listener {
         }
     }
 
-    /* ============================================================
-       CRAFTER BLOCK (1.21)
-       ============================================================ */
+    // Crafter
     @EventHandler
     public void onCrafterCraft(CrafterCraftEvent event) {
         if (event.getRecipe() == null) return;
@@ -106,9 +104,6 @@ public class ItemLimitListener implements Listener {
         }
     }
 
-    /* ============================================================
-       PICKUP (GROUND -> INVENTORY)
-       ============================================================ */
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onPickup(EntityPickupItemEvent event) {
         if (!(event.getEntity() instanceof Player player)) return;
@@ -174,20 +169,9 @@ public class ItemLimitListener implements Listener {
             sendPartialMessage(player, material, actuallyAdded, limit, true);
             return;
         }
-        // If totalAfterPickup <= limit, allow the pickup (don't cancel event)
-        if (itemLimitManager.isItemLimited(stack.getType())) {
-            if (itemLimitManager.countItemInInventory(player, stack.getType()) + stack.getAmount() > limit) {
-                int excess = itemLimitManager.countItemInInventory(player, stack.getType()) + stack.getAmount() - limit;
-                ItemStack toDrop = stack.clone();
-                toDrop.setAmount(excess);
-                player.getWorld().dropItem(player.getLocation(), toDrop);
-            }
-        }
+        // totalAfterPickup <= limit here, so the pickup is fully within limit - allow it.
     }
 
-    /* ============================================================
-       HAND SWAP (F KEY)
-       ============================================================ */
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onHandSwap(PlayerSwapHandItemsEvent event) {
         Player player = event.getPlayer();
@@ -224,9 +208,6 @@ public class ItemLimitListener implements Listener {
         }
     }
 
-    /* ============================================================
-       INVENTORY CLICK
-       ============================================================ */
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onInventoryClick(InventoryClickEvent event) {
         if (!(event.getWhoClicked() instanceof Player player)) return;
@@ -367,9 +348,6 @@ public class ItemLimitListener implements Listener {
         }
     }
 
-    /* ============================================================
-       DRAG EVENT - CRITICAL FOR CHEST/SHULKER DRAGGING
-       ============================================================ */
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onInventoryDrag(InventoryDragEvent event) {
         if (!(event.getWhoClicked() instanceof Player player)) return;
@@ -425,9 +403,6 @@ public class ItemLimitListener implements Listener {
         }
     }
 
-    /* ============================================================
-       SHIFT CLICK - HANDLES MASS TRANSFER
-       ============================================================ */
     @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
     public void onShiftClick(InventoryClickEvent event) {
         if (event.getClick() != ClickType.SHIFT_LEFT && event.getClick() != ClickType.SHIFT_RIGHT) return;
@@ -492,9 +467,6 @@ public class ItemLimitListener implements Listener {
         }
     }
 
-    /* ============================================================
-       INVENTORY CLOSE (ESC)
-       ============================================================ */
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onInventoryClose(InventoryCloseEvent event) {
         if (!(event.getPlayer() instanceof Player player)) return;
@@ -545,9 +517,6 @@ public class ItemLimitListener implements Listener {
         }.runTask(plugin);
     }
 
-    /* ============================================================
-       DROP KEY (Q)
-       ============================================================ */
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onDrop(PlayerDropItemEvent event) {
         Player player = event.getPlayer();
@@ -569,9 +538,6 @@ public class ItemLimitListener implements Listener {
         }
     }
 
-    /* ============================================================
-       LOGIN ENFORCEMENT
-       ============================================================ */
     @EventHandler
     public void onJoin(PlayerJoinEvent event) {
         Player player = event.getPlayer();
@@ -590,9 +556,7 @@ public class ItemLimitListener implements Listener {
         pickupCooldowns.remove(event.getPlayer().getUniqueId());
     }
 
-    /* ============================================================
-       HELPERS
-       ============================================================ */
+    // HELPERS
     private boolean isAddingToPlayer(InventoryAction action, Inventory clicked, Inventory playerInv) {
         if (action == InventoryAction.MOVE_TO_OTHER_INVENTORY) {
             return clicked != playerInv;
