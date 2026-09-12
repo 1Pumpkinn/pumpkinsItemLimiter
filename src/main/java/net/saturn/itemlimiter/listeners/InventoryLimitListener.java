@@ -30,7 +30,7 @@ public class InventoryLimitListener implements Listener {
     private final ExcessEnforcer excessEnforcer;
 
     public InventoryLimitListener(ItemLimiter plugin, ItemLimitManager itemLimitManager,
-                                   LimitMessenger messenger, ExcessEnforcer excessEnforcer) {
+                                  LimitMessenger messenger, ExcessEnforcer excessEnforcer) {
         this.plugin = plugin;
         this.itemLimitManager = itemLimitManager;
         this.messenger = messenger;
@@ -91,9 +91,13 @@ public class InventoryLimitListener implements Listener {
                 fromContainer = false;
                 break;
 
-            case MOVE_TO_OTHER_INVENTORY:
-                moving = event.getCurrentItem();
-                break;
+            // MOVE_TO_OTHER_INVENTORY (shift-click) is intentionally not
+            // handled here - it's fully owned by onShiftClick below, which
+            // never cancels it (cancelling a shift-click transfer out of a
+            // crafting/container inventory is unreliable and can leave the
+            // item stuck in the source slot, exploitable via Escape). If
+            // this handler also tried to cancel/partial-transfer the same
+            // click, it would reintroduce that exact bug.
 
             case HOTBAR_SWAP:
             case HOTBAR_MOVE_AND_READD:
@@ -106,6 +110,13 @@ public class InventoryLimitListener implements Listener {
                             fromContainer = false;
                         }
                     }
+                } else if (fromContainer) {
+                    // Pressing a number key while hovering a container slot
+                    // (crafting result, chest, furnace/anvil output, trade
+                    // result, etc.) swaps that slot straight into the hotbar,
+                    // completely bypassing PLACE_ALL/MOVE_TO_OTHER_INVENTORY.
+                    // Treat it the same as any other container -> player transfer.
+                    moving = event.getCurrentItem();
                 }
                 break;
 
@@ -246,6 +257,26 @@ public class InventoryLimitListener implements Listener {
         if (clickedInv == playerInv) return; // Only handle container -> player transfers.
 
         int limit = itemLimitManager.getLimit(material);
+
+        // Shift-clicking a crafting result is special: vanilla "craft all"
+        // can perform many crafts in a single click (moving far more than
+        // the single result stack visible in getCurrentItem()), and
+        // cancelling InventoryClickEvent is known to not reliably undo a
+        // crafting-inventory shift-click transfer - the ingredient can stay
+        // consumed with the result stuck in the output slot, which is
+        // itself a dupe vector (pressing Escape walks away with it). So
+        // instead of trying to cancel or predict the amount up front, always
+        // let the click fully resolve, then correct it a tick later by
+        // dropping anything banned or over the limit - the same safety net
+        // used for /give and other bypasses.
+        boolean isCraftingResult = clickedInv.getType() == InventoryType.CRAFTING
+                || clickedInv.getType() == InventoryType.WORKBENCH;
+
+        if (isCraftingResult) {
+            sweepExcessNextTick(player);
+            return;
+        }
+
         if (limit == 0) {
             event.setCancelled(true);
             messenger.sendBlocked(player, material, limit);
@@ -293,9 +324,26 @@ public class InventoryLimitListener implements Listener {
         if (material != null && itemLimitManager.isItemLimited(material)) {
             int limit = itemLimitManager.getLimit(material);
             int current = itemLimitManager.countItemInInventory(player, material);
+
             if (limit == 0 || current >= limit) {
                 dropCursorSafe(player);
                 messenger.sendBlocked(player, material, limit);
+            } else if (current + cursor.getAmount() > limit) {
+                // Cursor item doesn't push you over on its own, but merging
+                // it with what's already in your inventory would - keep only
+                // as many as fit under the limit and drop the exact excess.
+                int canKeep = limit - current;
+                int excess = cursor.getAmount() - canKeep;
+
+                ItemStack keep = cursor.clone();
+                keep.setAmount(canKeep);
+                player.setItemOnCursor(keep);
+
+                ItemStack drop = cursor.clone();
+                drop.setAmount(excess);
+                player.getWorld().dropItemNaturally(player.getLocation(), drop);
+
+                messenger.sendPartial(player, material, canKeep, limit);
             }
         }
 
@@ -332,8 +380,24 @@ public class InventoryLimitListener implements Listener {
     }
 
     // HELPERS
+    private void sweepExcessNextTick(Player player) {
+        new BukkitRunnable() {
+            @Override
+            public void run() {
+                if (!player.isOnline()) return;
+                excessEnforcer.checkAndDropAllExcess(player);
+            }
+        }.runTask(plugin);
+    }
+
     private boolean isAddingToPlayer(InventoryAction action, Inventory clicked, Inventory playerInv) {
         if (action == InventoryAction.MOVE_TO_OTHER_INVENTORY) {
+            return clicked != playerInv;
+        }
+        if (action == InventoryAction.HOTBAR_SWAP || action == InventoryAction.HOTBAR_MOVE_AND_READD) {
+            // A hotbar-swap that stays within the player's own inventory
+            // doesn't change their total count; only count it when the
+            // clicked slot belongs to an external container.
             return clicked != playerInv;
         }
         return clicked == playerInv;
