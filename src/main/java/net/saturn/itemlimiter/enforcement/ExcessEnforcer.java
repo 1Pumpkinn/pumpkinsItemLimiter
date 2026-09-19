@@ -6,6 +6,8 @@ import net.saturn.itemlimiter.util.ItemNameFormatter;
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
 
+import java.util.Map;
+
 /**
  * Sweeps a player's inventory for limited materials over their configured
  * limit and drops the excess. Used both reactively (e.g. after closing an
@@ -23,23 +25,27 @@ public class ExcessEnforcer {
     }
 
     /**
-     * Checks every limited material in the player's inventory, drops
-     * whatever is over its limit, and sends a single summary message
-     * if anything was dropped.
+     * Scans the inventory once, drops whatever is over its limit, and sends a
+     * single summary message if anything was dropped.
      */
     public void checkAndDropAllExcess(Player player) {
+        if (!itemLimitManager.hasLimitedItems()) return;
+
+        Map<Material, Integer> counts = itemLimitManager.countLimitedItems(player);
+        if (counts.isEmpty()) return;
+
         int totalDropped = 0;
-        for (Material material : itemLimitManager.getLimitedItems().keySet()) {
-            totalDropped += itemLimitManager.dropExcess(player, material);
+        for (Map.Entry<Material, Integer> entry : counts.entrySet()) {
+            totalDropped += itemLimitManager.dropExcess(player, entry.getKey(), entry.getValue());
         }
 
         if (totalDropped > 0) {
-            player.sendMessage(ItemNameFormatter.colorize(
-                    plugin.getConfig().getString(
-                            "messages.items-dropped-excess-all",
-                            "&eDropped &6{count} &eexcess limited items!"
-                    ).replace("{count}", String.valueOf(totalDropped))
-            ));
+            String message = plugin.getConfig().getString(
+                    "messages.items-dropped-excess-all",
+                    "&eDropped &6{count} &eexcess limited items!"
+            ).replace("{count}", String.valueOf(totalDropped));
+
+            player.sendMessage(ItemNameFormatter.colorize(message));
             player.updateInventory();
         }
     }

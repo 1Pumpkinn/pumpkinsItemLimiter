@@ -18,6 +18,8 @@ public final class ItemLimiter extends JavaPlugin {
 
     @Override
     public void onEnable() {
+        saveDefaultConfig();
+
         itemLimitManager = new ItemLimitManager(this);
         itemLimitManager.load();
 
@@ -25,7 +27,7 @@ public final class ItemLimiter extends JavaPlugin {
         ExcessEnforcer excessEnforcer = new ExcessEnforcer(this, itemLimitManager);
         sessionListener = new PlayerSessionListener(this, excessEnforcer, messenger);
 
-        getServer().getPluginManager().registerEvents(new CraftingLimitListener(itemLimitManager), this);
+        getServer().getPluginManager().registerEvents(new CraftingLimitListener(this, itemLimitManager, excessEnforcer), this);
         getServer().getPluginManager().registerEvents(new PickupLimitListener(itemLimitManager, messenger), this);
         getServer().getPluginManager().registerEvents(
                 new InventoryLimitListener(this, itemLimitManager, messenger, excessEnforcer), this);

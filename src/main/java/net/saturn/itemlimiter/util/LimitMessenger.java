@@ -15,8 +15,6 @@ import java.util.UUID;
  */
 public class LimitMessenger {
 
-    private static final long COOLDOWN_MS = 60_000L;
-
     private final ItemLimiter plugin;
     private final Map<UUID, Long> pickupCooldowns = new HashMap<>();
     private final Map<UUID, Long> blockedCooldowns = new HashMap<>();
@@ -42,7 +40,10 @@ public class LimitMessenger {
         if (!offCooldown(blockedCooldowns, player.getUniqueId())) return;
 
         String key = limit == 0 ? "messages.item-blocked-place-banned" : "messages.item-blocked-place-limit";
-        send(player, key, "&cYou cannot have &e{item}&c!", material, limit, -1);
+        String def = limit == 0
+                ? "&cCannot place &e{item}&c - it's banned!"
+                : "&cAt max &e{item}&c! Press Q to drop.";
+        send(player, key, def, material, limit, -1);
     }
 
     /** Sent when only part of a stack could be added because the rest would exceed the limit. */
@@ -67,10 +68,14 @@ public class LimitMessenger {
         partialCooldowns.remove(playerId);
     }
 
+    private long cooldownMillis() {
+        return Math.max(0L, plugin.getConfig().getLong("settings.message-cooldown-seconds", 5L)) * 1000L;
+    }
+
     private boolean offCooldown(Map<UUID, Long> cooldowns, UUID playerId) {
         long now = System.currentTimeMillis();
         long last = cooldowns.getOrDefault(playerId, 0L);
-        if (now - last < COOLDOWN_MS) return false;
+        if (now - last < cooldownMillis()) return false;
         cooldowns.put(playerId, now);
         return true;
     }

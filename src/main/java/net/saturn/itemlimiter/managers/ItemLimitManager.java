@@ -1,86 +1,123 @@
 package net.saturn.itemlimiter.managers;
 
 import net.saturn.itemlimiter.ItemLimiter;
+import org.bukkit.Location;
 import org.bukkit.Material;
+import org.bukkit.World;
 import org.bukkit.block.ShulkerBox;
+import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
+import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.PlayerInventory;
 import org.bukkit.inventory.meta.BlockStateMeta;
 import org.bukkit.inventory.meta.BundleMeta;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.*;
-import java.util.stream.Collectors;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.EnumMap;
+import java.util.EnumSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 
 public class ItemLimitManager {
 
+    private static final String LIMITS_PATH = "limited-items";
+    private static final String CONTAINER_SETTING = "settings.count-items-in-containers";
+    /** Pre-rename key; migrated to {@link #CONTAINER_SETTING} on load. */
+    private static final String LEGACY_CONTAINER_SETTING = "settings.limit-nested-containers";
+
+    /** Player inventory slots: 0-35 storage/hotbar, 36-39 armor, 40 off-hand. */
+    private static final int LAST_PLAYER_SLOT = 40;
+
+    // Built once - avoids String.endsWith() on every item of every scan.
+    private static final Set<Material> BUNDLES = EnumSet.noneOf(Material.class);
+    private static final Set<Material> SHULKER_BOXES = EnumSet.noneOf(Material.class);
+
+    static {
+        for (Material material : Material.values()) {
+            if (material.isLegacy()) continue;
+            String name = material.name();
+            if (name.equals("BUNDLE") || name.endsWith("_BUNDLE")) BUNDLES.add(material);
+            if (name.equals("SHULKER_BOX") || name.endsWith("_SHULKER_BOX")) SHULKER_BOXES.add(material);
+        }
+    }
+
     private final ItemLimiter plugin;
-    private final Map<Material, Integer> limitedItems; // Material -> max quantity (0 = completely banned)
+    private final Map<Material, Integer> limitedItems = new EnumMap<>(Material.class); // 0 = completely banned
+    private final Map<Material, Integer> limitedItemsView = Collections.unmodifiableMap(limitedItems);
     private final File dataFile;
     private FileConfiguration data;
 
+    // Cached so hot paths (every click/pickup) don't hit the config map.
+    private boolean countItemsInContainers = true;
+
     public ItemLimitManager(ItemLimiter plugin) {
         this.plugin = plugin;
-        this.limitedItems = new HashMap<>();
         this.dataFile = new File(plugin.getDataFolder(), "limited-items.yml");
     }
 
+    // ------------------------------------------------------------------
+    // Persistence
+    // ------------------------------------------------------------------
+
     public void load() {
+        migrateLegacySettings();
+        countItemsInContainers = plugin.getConfig().getBoolean(CONTAINER_SETTING, true);
+
         limitedItems.clear();
-
-        if (!dataFile.exists()) {
-            try {
-                dataFile.getParentFile().mkdirs();
-                dataFile.createNewFile();
-            } catch (IOException e) {
-                plugin.getLogger().severe("Could not create limited-items.yml: " + e.getMessage());
-            }
-        }
-
         data = YamlConfiguration.loadConfiguration(dataFile);
 
-        if (data.contains("limited-items")) {
-            for (String key : data.getConfigurationSection("limited-items").getKeys(false)) {
-                try {
-                    Material material = Material.valueOf(key.toUpperCase());
-                    int limit = data.getInt("limited-items." + key);
-                    limitedItems.put(material, limit);
-                } catch (IllegalArgumentException e) {
-                    plugin.getLogger().warning("Invalid material in limited-items.yml: " + key);
-                }
+        ConfigurationSection section = data.getConfigurationSection(LIMITS_PATH);
+        if (section == null) return;
+
+        for (String key : section.getKeys(false)) {
+            Material material = Material.matchMaterial(key);
+            if (material == null || material.isLegacy()) {
+                plugin.getLogger().warning("Invalid material in limited-items.yml: " + key);
+                continue;
             }
-            plugin.getLogger().info("Loaded " + limitedItems.size() + " limited items");
+            limitedItems.put(material, Math.max(0, section.getInt(key)));
         }
+        plugin.getLogger().info("Loaded " + limitedItems.size() + " limited items");
     }
 
     public void save() {
+        if (data == null) return;
         try {
-            data.set("limited-items", null);
-
-            if (!limitedItems.isEmpty()) {
-                for (Map.Entry<Material, Integer> entry : limitedItems.entrySet()) {
-                    data.set("limited-items." + entry.getKey().name(), entry.getValue());
-                }
+            data.set(LIMITS_PATH, null);
+            for (Map.Entry<Material, Integer> entry : limitedItems.entrySet()) {
+                data.set(LIMITS_PATH + "." + entry.getKey().name(), entry.getValue());
             }
-
             data.save(dataFile);
-            plugin.getLogger().info("Saved limited items");
         } catch (IOException e) {
             plugin.getLogger().severe("Could not save limited items: " + e.getMessage());
         }
     }
 
+    private void migrateLegacySettings() {
+        FileConfiguration config = plugin.getConfig();
+        if (config.contains(LEGACY_CONTAINER_SETTING, true) && !config.contains(CONTAINER_SETTING, true)) {
+            config.set(CONTAINER_SETTING, config.getBoolean(LEGACY_CONTAINER_SETTING, true));
+            config.set(LEGACY_CONTAINER_SETTING, null);
+            plugin.saveConfig();
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Limit management
+    // ------------------------------------------------------------------
+
     public boolean addItem(Material material, int maxQuantity) {
-        if (material == null || material == Material.AIR) {
+        if (material == null || material.isAir() || maxQuantity < 0) {
             return false;
         }
-
-        if (maxQuantity < 0) {
-            return false;
-        }
-
         limitedItems.put(material, maxQuantity);
         save();
         return true;
@@ -88,10 +125,13 @@ public class ItemLimitManager {
 
     public boolean removeItem(Material material) {
         boolean removed = limitedItems.remove(material) != null;
-        if (removed) {
-            save();
-        }
+        if (removed) save();
         return removed;
+    }
+
+    public void clearItems() {
+        limitedItems.clear();
+        save();
     }
 
     public boolean isItemLimited(Material material) {
@@ -103,7 +143,8 @@ public class ItemLimitManager {
     }
 
     public boolean isItemBanned(Material material) {
-        return limitedItems.containsKey(material) && limitedItems.get(material) == 0;
+        Integer limit = limitedItems.get(material);
+        return limit != null && limit == 0;
     }
 
     public boolean isItemBanned(ItemStack item) {
@@ -118,331 +159,235 @@ public class ItemLimitManager {
         return item != null ? limitedItems.get(item.getType()) : null;
     }
 
+    /** Read-only live view. Copy it before modifying limits while iterating. */
     public Map<Material, Integer> getLimitedItems() {
-        return new HashMap<>(limitedItems);
+        return limitedItemsView;
     }
 
     public List<String> getLimitedItemNames() {
-        return limitedItems.keySet().stream()
-                .map(Material::name)
-                .sorted()
-                .collect(Collectors.toList());
+        return limitedItems.keySet().stream().map(Material::name).sorted().toList();
     }
 
     public int getLimitedItemCount() {
         return limitedItems.size();
     }
 
-    public void clearItems() {
-        limitedItems.clear();
-        save();
-    }
-
     public boolean hasLimitedItems() {
         return !limitedItems.isEmpty();
     }
 
+    // ------------------------------------------------------------------
+    // Container setting
+    // ------------------------------------------------------------------
+
     /**
-     * Whether items nested inside bundles/shulker boxes count toward limits.
-     * Backed by config.yml so it can be toggled live via /itemlimit nested.
+     * Whether items inside bundles/shulker boxes count toward limits.
+     * Toggle live via /itemlimit containers.
      */
-    public boolean isLimitNestedContainers() {
-        return plugin.getConfig().getBoolean("settings.limit-nested-containers", true);
+    public boolean isCountingItemsInContainers() {
+        return countItemsInContainers;
     }
 
-    public void setLimitNestedContainers(boolean value) {
-        plugin.getConfig().set("settings.limit-nested-containers", value);
+    public void setCountItemsInContainers(boolean value) {
+        countItemsInContainers = value;
+        plugin.getConfig().set(CONTAINER_SETTING, value);
         plugin.saveConfig();
     }
 
-    /**
-     * Counts how many of a specific material a player has across their entire
-     * inventory, including items nested inside bundles and shulker boxes
-     * (unless nested-container limiting has been disabled).
-     */
-    public int countItemInInventory(org.bukkit.entity.Player player, Material material) {
-        boolean nested = isLimitNestedContainers();
-        int count = 0;
+    // ------------------------------------------------------------------
+    // Counting
+    // ------------------------------------------------------------------
 
-        for (ItemStack item : player.getInventory().getStorageContents()) {
-            count += countItemInStack(item, material, nested);
-        }
-
-        for (ItemStack item : player.getInventory().getArmorContents()) {
-            count += countItemInStack(item, material, nested);
-        }
-
-        count += countItemInStack(player.getInventory().getItemInOffHand(), material, nested);
-
-        return count;
+    /** Counts one material across the whole player inventory (armor/off-hand included). */
+    public int countItemInInventory(Player player, Material material) {
+        Map<Material, Integer> counts = new EnumMap<>(Material.class);
+        scan(player, material, counts);
+        return counts.getOrDefault(material, 0);
     }
 
     /**
-     * Recursively counts how many of a specific material are in an ItemStack,
-     * looking inside bundles and shulker boxes when nested is true.
+     * Counts every limited material in a single pass over the inventory.
+     * Much cheaper than one scan per material, since unpacking shulker boxes
+     * is the expensive part.
      */
-    private int countItemInStack(ItemStack item, Material material, boolean nested) {
-        if (item == null || item.getType() == Material.AIR) return 0;
+    public Map<Material, Integer> countLimitedItems(Player player) {
+        Map<Material, Integer> counts = new EnumMap<>(Material.class);
+        if (!limitedItems.isEmpty()) {
+            scan(player, null, counts);
+        }
+        return counts;
+    }
+
+    private void scan(Player player, Material only, Map<Material, Integer> counts) {
+        PlayerInventory inventory = player.getInventory();
+        for (int slot = 0; slot <= LAST_PLAYER_SLOT; slot++) {
+            countInto(inventory.getItem(slot), only, counts);
+        }
+    }
+
+    /** @param only a single material to count, or null for every limited material. */
+    private void countInto(ItemStack item, Material only, Map<Material, Integer> counts) {
+        if (item == null || item.getType().isAir()) return;
 
         Material type = item.getType();
-        int count = 0;
-
-        if (type == material) {
-            count += item.getAmount();
+        if (only != null ? type == only : limitedItems.containsKey(type)) {
+            counts.merge(type, item.getAmount(), Integer::sum);
         }
 
-        if (!nested) return count;
+        if (!countItemsInContainers) return;
 
-        if (isBundle(type) && item.getItemMeta() instanceof BundleMeta bundleMeta) {
-            if (bundleMeta.hasItems()) {
-                for (ItemStack bundled : bundleMeta.getItems()) {
-                    count += countItemInStack(bundled, material, true);
+        if (BUNDLES.contains(type)) {
+            if (item.getItemMeta() instanceof BundleMeta meta && meta.hasItems()) {
+                for (ItemStack bundled : meta.getItems()) {
+                    countInto(bundled, only, counts);
+                }
+            }
+        } else if (SHULKER_BOXES.contains(type)) {
+            if (item.getItemMeta() instanceof BlockStateMeta meta
+                    && meta.getBlockState() instanceof ShulkerBox box) {
+                for (ItemStack contained : box.getInventory().getContents()) {
+                    countInto(contained, only, counts);
                 }
             }
         }
+    }
 
-        if (isShulkerBox(type) && item.getItemMeta() instanceof BlockStateMeta blockMeta) {
-            if (blockMeta.getBlockState() instanceof ShulkerBox shulkerBox) {
-                for (ItemStack contained : shulkerBox.getInventory().getContents()) {
-                    count += countItemInStack(contained, material, true);
-                }
-            }
-        }
+    // ------------------------------------------------------------------
+    // Enforcement
+    // ------------------------------------------------------------------
 
-        return count;
+    /** Drops whatever is over the limit for one material. Returns the amount dropped. */
+    public int dropExcess(Player player, Material material) {
+        return dropExcess(player, material, countItemInInventory(player, material));
     }
 
     /**
-     * Matches the plain BUNDLE as well as every dyed variant
-     * (e.g. RED_BUNDLE, BLACK_BUNDLE, ...), since each color is its own Material.
+     * Drops whatever is over the limit, given a count the caller already has
+     * (avoids re-scanning). Loose stacks go first; items inside bundles and
+     * shulker boxes are only touched if that isn't enough.
      */
-    private boolean isBundle(Material material) {
-        return material == Material.BUNDLE || material.name().endsWith("_BUNDLE");
-    }
-
-    private boolean isShulkerBox(Material material) {
-        return material == Material.SHULKER_BOX || material.name().endsWith("_SHULKER_BOX");
-    }
-
-    /**
-     * Drops excess items from player's inventory to enforce limits.
-     * Strips items from bundles and shulker boxes as needed.
-     * Returns the number of items dropped.
-     */
-    public int dropExcess(org.bukkit.entity.Player player, Material material) {
+    public int dropExcess(Player player, Material material, int currentCount) {
         Integer limit = limitedItems.get(material);
-        if (limit == null) {
-            return 0;
-        }
-
-        int currentCount = countItemInInventory(player, material);
-
-        if (currentCount <= limit) {
-            return 0; // Within limit
-        }
+        if (limit == null) return 0;
 
         int toDrop = currentCount - limit;
+        if (toDrop <= 0) return 0;
+
+        PlayerInventory inventory = player.getInventory();
+        World world = player.getWorld();
+        Location location = player.getLocation();
         int dropped = 0;
-        boolean nested = isLimitNestedContainers();
 
-        // Main inventory (slots 0-35: hotbar + storage)
-        for (int i = 0; i < 36 && dropped < toDrop; i++) {
-            ItemStack item = player.getInventory().getItem(i);
-            if (item == null || item.getType() == Material.AIR) continue;
+        // Pass 1: loose stacks.
+        for (int slot = 0; slot <= LAST_PLAYER_SLOT && dropped < toDrop; slot++) {
+            ItemStack item = inventory.getItem(slot);
+            if (item == null || item.getType() != material) continue;
 
-            if (item.getType() == material) {
-                int amount = item.getAmount();
-                int canDrop = Math.min(amount, toDrop - dropped);
-                if (canDrop >= amount) {
-                    player.getInventory().setItem(i, null);
-                    player.getWorld().dropItemNaturally(player.getLocation(), item);
-                } else {
-                    ItemStack dropStack = item.clone();
-                    dropStack.setAmount(canDrop);
-                    item.setAmount(amount - canDrop);
-                    player.getWorld().dropItemNaturally(player.getLocation(), dropStack);
-                }
-                dropped += canDrop;
-                continue;
+            int take = Math.min(item.getAmount(), toDrop - dropped);
+            ItemStack out = item.clone();
+            out.setAmount(take);
+
+            if (take >= item.getAmount()) {
+                inventory.setItem(slot, null);
+            } else {
+                item.setAmount(item.getAmount() - take);
+                inventory.setItem(slot, item);
             }
-
-            if (nested && isBundle(item.getType())) {
-                int canDrop = dropFromBundle(item, material, toDrop - dropped, player);
-                if (canDrop > 0) {
-                    player.getInventory().setItem(i, item);
-                    dropped += canDrop;
-                }
-                continue;
-            }
-
-            if (nested && isShulkerBox(item.getType())) {
-                int canDrop = dropFromShulker(item, material, toDrop - dropped, player);
-                if (canDrop > 0) {
-                    player.getInventory().setItem(i, item);
-                    dropped += canDrop;
-                }
-            }
+            world.dropItemNaturally(location, out);
+            dropped += take;
         }
 
-        if (dropped < toDrop) {
-            ItemStack[] armor = player.getInventory().getArmorContents();
-            for (int i = 0; i < armor.length && dropped < toDrop; i++) {
-                if (armor[i] == null || armor[i].getType() != material) continue;
-                int amount = armor[i].getAmount();
-                int canDrop = Math.min(amount, toDrop - dropped);
-                if (canDrop >= amount) {
-                    player.getWorld().dropItemNaturally(player.getLocation(), armor[i]);
-                    armor[i] = null;
-                } else {
-                    ItemStack dropStack = armor[i].clone();
-                    dropStack.setAmount(canDrop);
-                    armor[i].setAmount(amount - canDrop);
-                    player.getWorld().dropItemNaturally(player.getLocation(), dropStack);
-                }
-                dropped += canDrop;
-            }
-            player.getInventory().setArmorContents(armor);
-        }
+        // Pass 2: inside containers.
+        if (dropped < toDrop && countItemsInContainers) {
+            for (int slot = 0; slot <= LAST_PLAYER_SLOT && dropped < toDrop; slot++) {
+                ItemStack item = inventory.getItem(slot);
+                if (item == null) continue;
 
-        if (dropped < toDrop) {
-            ItemStack offHand = player.getInventory().getItemInOffHand();
-            if (offHand != null && offHand.getType() == material) {
-                int amount = offHand.getAmount();
-                int canDrop = Math.min(amount, toDrop - dropped);
-                if (canDrop >= amount) {
-                    player.getWorld().dropItemNaturally(player.getLocation(), offHand);
-                    player.getInventory().setItemInOffHand(null);
-                } else {
-                    ItemStack dropStack = offHand.clone();
-                    dropStack.setAmount(canDrop);
-                    offHand.setAmount(amount - canDrop);
-                    player.getWorld().dropItemNaturally(player.getLocation(), dropStack);
+                int removed = 0;
+                if (BUNDLES.contains(item.getType())) {
+                    removed = dropFromBundle(item, material, toDrop - dropped, world, location);
+                } else if (SHULKER_BOXES.contains(item.getType())) {
+                    removed = dropFromShulker(item, material, toDrop - dropped, world, location);
                 }
-                dropped += canDrop;
+
+                if (removed > 0) {
+                    inventory.setItem(slot, item);
+                    dropped += removed;
+                }
             }
         }
 
         return dropped;
     }
 
-    /**
-     * Recursively drops matching items out of a bundle's contents, descending
-     * into any bundles or shulker boxes nested inside it. Mutates the given
-     * bundle ItemStack's meta in place. Returns the number of items dropped.
-     */
-    private int dropFromBundle(ItemStack bundleItem, Material material, int toDrop, org.bukkit.entity.Player player) {
-        if (toDrop <= 0 || !(bundleItem.getItemMeta() instanceof BundleMeta bundleMeta) || !bundleMeta.hasItems()) {
+    /** Mutates the bundle's meta in place. Returns the amount dropped. */
+    private int dropFromBundle(ItemStack bundleItem, Material material, int want, World world, Location location) {
+        if (want <= 0 || !(bundleItem.getItemMeta() instanceof BundleMeta meta) || !meta.hasItems()) {
             return 0;
         }
 
-        List<ItemStack> contents = new ArrayList<>(bundleMeta.getItems());
-        int dropped = 0;
-        boolean changed = false;
+        List<ItemStack> contents = new ArrayList<>(meta.getItems());
+        int removed = extract(contents, material, want, world, location);
 
-        for (int j = contents.size() - 1; j >= 0 && dropped < toDrop; j--) {
-            ItemStack inner = contents.get(j);
-            if (inner == null || inner.getType() == Material.AIR) continue;
+        if (removed > 0) {
+            contents.removeIf(Objects::isNull);
+            meta.setItems(contents);
+            bundleItem.setItemMeta(meta);
+        }
+        return removed;
+    }
 
-            if (inner.getType() == material) {
-                int amount = inner.getAmount();
-                int canDrop = Math.min(amount, toDrop - dropped);
-                if (canDrop >= amount) {
-                    contents.remove(j);
-                } else {
-                    inner.setAmount(amount - canDrop);
-                    contents.set(j, inner);
-                }
-                player.getWorld().dropItemNaturally(player.getLocation(), new ItemStack(material, canDrop));
-                dropped += canDrop;
-                changed = true;
-                continue;
-            }
-
-            if (isBundle(inner.getType())) {
-                int canDrop = dropFromBundle(inner, material, toDrop - dropped, player);
-                if (canDrop > 0) {
-                    contents.set(j, inner);
-                    dropped += canDrop;
-                    changed = true;
-                }
-            } else if (isShulkerBox(inner.getType())) {
-                int canDrop = dropFromShulker(inner, material, toDrop - dropped, player);
-                if (canDrop > 0) {
-                    contents.set(j, inner);
-                    dropped += canDrop;
-                    changed = true;
-                }
-            }
+    /** Mutates the shulker box's stored contents in place. Returns the amount dropped. */
+    private int dropFromShulker(ItemStack shulkerItem, Material material, int want, World world, Location location) {
+        if (want <= 0
+                || !(shulkerItem.getItemMeta() instanceof BlockStateMeta meta)
+                || !(meta.getBlockState() instanceof ShulkerBox box)) {
+            return 0;
         }
 
-        if (changed) {
-            bundleMeta.setItems(contents);
-            bundleItem.setItemMeta(bundleMeta);
-        }
+        List<ItemStack> contents = new ArrayList<>(Arrays.asList(box.getInventory().getContents()));
+        int removed = extract(contents, material, want, world, location);
 
-        return dropped;
+        if (removed > 0) {
+            box.getInventory().setContents(contents.toArray(new ItemStack[0]));
+            meta.setBlockState(box);
+            shulkerItem.setItemMeta(meta);
+        }
+        return removed;
     }
 
     /**
-     * Recursively drops matching items out of a shulker box's contents,
-     * descending into any bundles or shulker boxes nested inside it. Mutates
-     * the given shulker box ItemStack's meta in place. Returns the number of
-     * items dropped.
+     * Shared by bundles and shulker boxes: drops up to {@code want} of the
+     * material out of {@code contents}, recursing into nested containers.
+     * Fully removed entries are set to null (callers compact if needed);
+     * dropped stacks are clones, so enchants/names/etc. are preserved.
      */
-    private int dropFromShulker(ItemStack shulkerItem, Material material, int toDrop, org.bukkit.entity.Player player) {
-        if (toDrop <= 0 || !(shulkerItem.getItemMeta() instanceof BlockStateMeta blockMeta)) {
-            return 0;
-        }
-        if (!(blockMeta.getBlockState() instanceof ShulkerBox shulkerBox)) {
-            return 0;
-        }
+    private int extract(List<ItemStack> contents, Material material, int want, World world, Location location) {
+        int removed = 0;
 
-        ItemStack[] contents = shulkerBox.getInventory().getContents();
-        int dropped = 0;
-        boolean changed = false;
+        for (int i = contents.size() - 1; i >= 0 && removed < want; i--) {
+            ItemStack inner = contents.get(i);
+            if (inner == null || inner.getType().isAir()) continue;
 
-        for (int j = 0; j < contents.length && dropped < toDrop; j++) {
-            ItemStack inner = contents[j];
-            if (inner == null || inner.getType() == Material.AIR) continue;
+            Material type = inner.getType();
+            if (type == material) {
+                int take = Math.min(inner.getAmount(), want - removed);
+                ItemStack out = inner.clone();
+                out.setAmount(take);
+                world.dropItemNaturally(location, out);
 
-            if (inner.getType() == material) {
-                int amount = inner.getAmount();
-                int canDrop = Math.min(amount, toDrop - dropped);
-                if (canDrop >= amount) {
-                    contents[j] = null;
+                if (take >= inner.getAmount()) {
+                    contents.set(i, null);
                 } else {
-                    inner.setAmount(amount - canDrop);
-                    contents[j] = inner;
+                    inner.setAmount(inner.getAmount() - take);
                 }
-                player.getWorld().dropItemNaturally(player.getLocation(), new ItemStack(material, canDrop));
-                dropped += canDrop;
-                changed = true;
-                continue;
-            }
-
-            if (isBundle(inner.getType())) {
-                int canDrop = dropFromBundle(inner, material, toDrop - dropped, player);
-                if (canDrop > 0) {
-                    contents[j] = inner;
-                    dropped += canDrop;
-                    changed = true;
-                }
-            } else if (isShulkerBox(inner.getType())) {
-                int canDrop = dropFromShulker(inner, material, toDrop - dropped, player);
-                if (canDrop > 0) {
-                    contents[j] = inner;
-                    dropped += canDrop;
-                    changed = true;
-                }
+                removed += take;
+            } else if (BUNDLES.contains(type)) {
+                removed += dropFromBundle(inner, material, want - removed, world, location);
+            } else if (SHULKER_BOXES.contains(type)) {
+                removed += dropFromShulker(inner, material, want - removed, world, location);
             }
         }
-
-        if (changed) {
-            shulkerBox.getInventory().setContents(contents);
-            blockMeta.setBlockState(shulkerBox);
-            shulkerItem.setItemMeta(blockMeta);
-        }
-
-        return dropped;
+        return removed;
     }
 }

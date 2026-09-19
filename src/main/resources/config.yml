@@ -1,9 +1,12 @@
 settings:
-  # If true, items nested inside bundles and shulker boxes count toward a
+  # If true, items stored inside bundles and shulker boxes also count toward a
   # player's limit. If false, only items sitting directly in the inventory
-  # (including armor/off-hand) are counted - containers are ignored.
-  # Can be toggled in-game with /itemlimit nested <on|off>.
-  limit-nested-containers: true
+  # (hotbar, storage, armor, off-hand) are counted - containers are ignored.
+  # Toggle in-game with /itemlimit containers <on|off>.
+  count-items-in-containers: true
+
+  # Minimum seconds between repeated chat messages of the same type per player.
+  message-cooldown-seconds: 5
 
 messages:
   item-banned: "&e{item} &chas been banned!"
@@ -21,6 +24,4 @@ messages:
   item-blocked-trade-banned: "&cCannot trade for &e{item}&c - it's banned!"
   item-blocked-trade-limit: "&cCannot trade for &e{item}&c - at max ({limit})!"
   item-blocked-trade-partial: "&cTrade exceeds limit! Can have &6{remaining} &cmore &e{item} &7(max: {limit})"
-  items-dropped-login: "&eDropped &6{count} &elimited items!"
-  item-excess-removed: "&cRemoved &e{amount} {item}&c - over limit of {limit}!"
-  item-excess-dropped: "&cDropped &e{amount} {item}&c - over limit!"
+  items-dropped-excess-all: "&eDropped &6{count} &eexcess limited items!"

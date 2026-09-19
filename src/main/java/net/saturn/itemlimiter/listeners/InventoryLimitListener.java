@@ -14,7 +14,6 @@ import org.bukkit.event.player.PlayerDropItemEvent;
 import org.bukkit.event.player.PlayerSwapHandItemsEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
-import org.bukkit.scheduler.BukkitRunnable;
 
 /**
  * Enforces item limits across every way an item can land in a player's
@@ -72,6 +71,13 @@ public class InventoryLimitListener implements Listener {
 
         Inventory clicked = event.getClickedInventory();
         if (clicked == null) return;
+
+        // Taking a craft result is never blocked (e.g. via number-key swap) -
+        // anything over the limit is dropped by the sweep right after.
+        if (event.getSlotType() == InventoryType.SlotType.RESULT && isCraftingType(clicked.getType())) {
+            sweepExcessNextTick(player);
+            return;
+        }
 
         Inventory playerInv = player.getInventory();
         InventoryAction action = event.getAction();
@@ -269,8 +275,7 @@ public class InventoryLimitListener implements Listener {
         // let the click fully resolve, then correct it a tick later by
         // dropping anything banned or over the limit - the same safety net
         // used for /give and other bypasses.
-        boolean isCraftingResult = clickedInv.getType() == InventoryType.CRAFTING
-                || clickedInv.getType() == InventoryType.WORKBENCH;
+        boolean isCraftingResult = isCraftingType(clickedInv.getType());
 
         if (isCraftingResult) {
             sweepExcessNextTick(player);
@@ -295,21 +300,18 @@ public class InventoryLimitListener implements Listener {
             event.setCancelled(true);
             int canTransfer = limit - current;
 
-            new BukkitRunnable() {
-                @Override
-                public void run() {
-                    if (!player.isOnline()) return;
+            plugin.getServer().getScheduler().runTask(plugin, () -> {
+                if (!player.isOnline()) return;
 
-                    clicked.setAmount(clicked.getAmount() - canTransfer);
+                clicked.setAmount(clicked.getAmount() - canTransfer);
 
-                    ItemStack toAdd = clicked.clone();
-                    toAdd.setAmount(canTransfer);
-                    playerInv.addItem(toAdd);
+                ItemStack toAdd = clicked.clone();
+                toAdd.setAmount(canTransfer);
+                playerInv.addItem(toAdd);
 
-                    player.updateInventory();
-                    messenger.sendPartial(player, material, canTransfer, limit);
-                }
-            }.runTask(plugin);
+                player.updateInventory();
+                messenger.sendPartial(player, material, canTransfer, limit);
+            });
         }
     }
 
@@ -349,13 +351,7 @@ public class InventoryLimitListener implements Listener {
 
         // Also sweep for excess items that may have been added (e.g. /give)
         // while this inventory was open.
-        new BukkitRunnable() {
-            @Override
-            public void run() {
-                if (!player.isOnline()) return;
-                excessEnforcer.checkAndDropAllExcess(player);
-            }
-        }.runTask(plugin);
+        sweepExcessNextTick(player);
     }
 
 
@@ -380,14 +376,17 @@ public class InventoryLimitListener implements Listener {
     }
 
     // HELPERS
+    private boolean isCraftingType(InventoryType type) {
+        return type == InventoryType.CRAFTING
+                || type == InventoryType.WORKBENCH
+                || type == InventoryType.SMITHING;
+    }
+
     private void sweepExcessNextTick(Player player) {
-        new BukkitRunnable() {
-            @Override
-            public void run() {
-                if (!player.isOnline()) return;
-                excessEnforcer.checkAndDropAllExcess(player);
-            }
-        }.runTask(plugin);
+        if (!itemLimitManager.hasLimitedItems()) return;
+        plugin.getServer().getScheduler().runTask(plugin, () -> {
+            if (player.isOnline()) excessEnforcer.checkAndDropAllExcess(player);
+        });
     }
 
     private boolean isAddingToPlayer(InventoryAction action, Inventory clicked, Inventory playerInv) {
@@ -404,46 +403,40 @@ public class InventoryLimitListener implements Listener {
     }
 
     private void handlePartialTransferFromContainer(Player player, InventoryClickEvent event, Material material, int canAdd) {
-        new BukkitRunnable() {
-            @Override
-            public void run() {
-                if (!player.isOnline()) return;
+        plugin.getServer().getScheduler().runTask(plugin, () -> {
+            if (!player.isOnline()) return;
 
-                ItemStack source = event.getCurrentItem();
-                if (source == null) return;
+            ItemStack source = event.getCurrentItem();
+            if (source == null) return;
 
-                source.setAmount(source.getAmount() - canAdd);
+            source.setAmount(source.getAmount() - canAdd);
 
-                ItemStack toAdd = source.clone();
-                toAdd.setAmount(canAdd);
-                player.getInventory().addItem(toAdd);
+            ItemStack toAdd = source.clone();
+            toAdd.setAmount(canAdd);
+            player.getInventory().addItem(toAdd);
 
-                player.updateInventory();
-                messenger.sendPartial(player, material, canAdd, itemLimitManager.getLimit(material));
-            }
-        }.runTask(plugin);
+            player.updateInventory();
+            messenger.sendPartial(player, material, canAdd, itemLimitManager.getLimit(material));
+        });
     }
 
     private void handlePartialTransferFromCursor(Player player, ItemStack cursor, Material material, int canAdd) {
-        new BukkitRunnable() {
-            @Override
-            public void run() {
-                if (!player.isOnline()) return;
+        plugin.getServer().getScheduler().runTask(plugin, () -> {
+            if (!player.isOnline()) return;
 
-                ItemStack toAdd = cursor.clone();
-                toAdd.setAmount(canAdd);
-                player.getInventory().addItem(toAdd);
+            ItemStack toAdd = cursor.clone();
+            toAdd.setAmount(canAdd);
+            player.getInventory().addItem(toAdd);
 
-                ItemStack toDrop = cursor.clone();
-                toDrop.setAmount(cursor.getAmount() - canAdd);
-                player.getWorld().dropItemNaturally(player.getLocation(), toDrop);
+            ItemStack toDrop = cursor.clone();
+            toDrop.setAmount(cursor.getAmount() - canAdd);
+            player.getWorld().dropItemNaturally(player.getLocation(), toDrop);
 
-                player.setItemOnCursor(null);
-                player.updateInventory();
+            player.setItemOnCursor(null);
+            player.updateInventory();
 
-                messenger.sendPartial(player, material, canAdd, itemLimitManager.getLimit(material));
-            }
-        }.runTask(plugin);
+            messenger.sendPartial(player, material, canAdd, itemLimitManager.getLimit(material));
+        });
     }
 
     private void dropCursorSafe(Player player) {
@@ -453,11 +446,7 @@ public class InventoryLimitListener implements Listener {
         ItemStack drop = cursor.clone();
         player.setItemOnCursor(null);
 
-        new BukkitRunnable() {
-            @Override
-            public void run() {
-                player.getWorld().dropItemNaturally(player.getLocation(), drop);
-            }
-        }.runTask(plugin);
+        plugin.getServer().getScheduler().runTask(plugin,
+                () -> player.getWorld().dropItemNaturally(player.getLocation(), drop));
     }
 }

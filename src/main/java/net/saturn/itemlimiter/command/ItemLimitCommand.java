@@ -15,10 +15,20 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 public class ItemLimitCommand implements CommandExecutor, TabCompleter {
+
+    private static final List<String> SUB_COMMANDS =
+            List.of("add", "remove", "list", "check", "clear", "containers", "info", "reload");
+
+    // Built once instead of on every tab-complete keystroke.
+    private static final List<String> ITEM_NAMES = Arrays.stream(Material.values())
+            .filter(m -> !m.isLegacy() && m.isItem() && !m.isAir())
+            .map(Material::name)
+            .sorted()
+            .toList();
 
     private final ItemLimiter plugin;
     private final ItemLimitManager itemLimitManager;
@@ -53,8 +63,9 @@ public class ItemLimitCommand implements CommandExecutor, TabCompleter {
                 return handleClear(sender);
             case "check":
                 return handleCheck(sender, args);
-            case "nested":
-                return handleNested(sender, args);
+            case "containers":
+            case "nested": // old name, kept so existing muscle memory/scripts still work
+                return handleContainers(sender, args);
             case "reload":
                 return handleReload(sender);
             case "info":
@@ -197,7 +208,7 @@ public class ItemLimitCommand implements CommandExecutor, TabCompleter {
         }
 
         List<Map.Entry<Material, Integer>> entries = new ArrayList<>(limitedItems.entrySet());
-        entries.sort(Map.Entry.comparingByKey((m1, m2) -> m1.name().compareTo(m2.name())));
+        entries.sort(Map.Entry.comparingByKey(Comparator.comparing(Material::name)));
 
         int totalPages = (int) Math.ceil((double) entries.size() / itemsPerPage);
 
@@ -286,26 +297,27 @@ public class ItemLimitCommand implements CommandExecutor, TabCompleter {
         return true;
     }
 
-    private boolean handleNested(CommandSender sender, String[] args) {
+    private boolean handleContainers(CommandSender sender, String[] args) {
         if (args.length < 2) {
-            boolean current = itemLimitManager.isLimitNestedContainers();
-            sender.sendMessage(colorize("&cUsage: /itemlimit nested <on|off>"));
-            sender.sendMessage(colorize("&7Currently: " + (current ? "&aON &7(items in bundles/shulker boxes count)" : "&cOFF &7(only top-level inventory items count)")));
+            boolean current = itemLimitManager.isCountingItemsInContainers();
+            sender.sendMessage(colorize("&cUsage: /itemlimit containers <on|off>"));
+            sender.sendMessage(colorize("&7Currently: " + (current
+                    ? "&aON &7(items in bundles/shulker boxes count)"
+                    : "&cOFF &7(only items directly in the inventory count)")));
             return true;
         }
 
-        String state = args[1].toLowerCase();
         boolean value;
-        if (state.equals("on") || state.equals("true") || state.equals("enable")) {
-            value = true;
-        } else if (state.equals("off") || state.equals("false") || state.equals("disable")) {
-            value = false;
-        } else {
-            sender.sendMessage(colorize("&cUsage: /itemlimit nested <on|off>"));
-            return true;
+        switch (args[1].toLowerCase(Locale.ROOT)) {
+            case "on", "true", "enable" -> value = true;
+            case "off", "false", "disable" -> value = false;
+            default -> {
+                sender.sendMessage(colorize("&cUsage: /itemlimit containers <on|off>"));
+                return true;
+            }
         }
 
-        itemLimitManager.setLimitNestedContainers(value);
+        itemLimitManager.setCountItemsInContainers(value);
 
         if (value) {
             sender.sendMessage(colorize("&aItems inside bundles and shulker boxes now count toward limits."));
@@ -376,7 +388,7 @@ public class ItemLimitCommand implements CommandExecutor, TabCompleter {
         sender.sendMessage(colorize("&e/itemlimit list [page] &7- List all limited items"));
         sender.sendMessage(colorize("&e/itemlimit check <item> &7- Check if item is limited"));
         sender.sendMessage(colorize("&e/itemlimit clear &7- Clear all limited items"));
-        sender.sendMessage(colorize("&e/itemlimit nested <on|off> &7- Toggle limiting items inside bundles/shulker boxes"));
+        sender.sendMessage(colorize("&e/itemlimit containers <on|off> &7- Toggle counting items inside bundles/shulker boxes"));
         sender.sendMessage(colorize("&e/itemlimit info <player> &7- Show a player's current counts of limited items"));
         sender.sendMessage(colorize("&e/itemlimit reload &7- Reload config.yml and limited-items.yml"));
         sender.sendMessage(colorize("&6&m---------------------------------------"));
@@ -387,12 +399,10 @@ public class ItemLimitCommand implements CommandExecutor, TabCompleter {
      * like "golden apple" or "golden-apple" in addition to "GOLDEN_APPLE".
      */
     private Material parseMaterial(String rawName) {
-        String normalized = rawName.trim().replace(' ', '_').replace('-', '_').toUpperCase();
-        try {
-            return Material.valueOf(normalized);
-        } catch (IllegalArgumentException e) {
-            return null;
-        }
+        String normalized = rawName.trim().replace(' ', '_').replace('-', '_').toUpperCase(Locale.ROOT);
+        Material material = Material.matchMaterial(normalized);
+        // Rejects legacy materials and non-items (WATER, CAVE_AIR, ...).
+        return material != null && !material.isLegacy() && material.isItem() ? material : null;
     }
 
     private String formatMaterialName(Material material) {
@@ -408,33 +418,28 @@ public class ItemLimitCommand implements CommandExecutor, TabCompleter {
         List<String> completions = new ArrayList<>();
 
         if (args.length == 1) {
-            completions.addAll(Arrays.asList("add", "remove", "list", "check", "clear", "nested", "info", "reload"));
+            completions.addAll(SUB_COMMANDS);
         } else if (args.length == 2) {
-            if (args[0].equalsIgnoreCase("add") || args[0].equalsIgnoreCase("check")) {
-                completions.addAll(Arrays.stream(Material.values())
-                        .filter(Material::isItem)
-                        .filter(m -> m != Material.AIR)
-                        .map(Material::name)
-                        .collect(Collectors.toList()));
-            } else if (args[0].equalsIgnoreCase("remove")) {
-                completions.addAll(itemLimitManager.getLimitedItemNames());
-            } else if (args[0].equalsIgnoreCase("list")) {
-                int totalPages = (int) Math.ceil((double) itemLimitManager.getLimitedItemCount() / 10);
-                for (int i = 1; i <= Math.min(totalPages, 5); i++) {
-                    completions.add(String.valueOf(i));
+            switch (args[0].toLowerCase(Locale.ROOT)) {
+                case "add", "check" -> completions.addAll(ITEM_NAMES);
+                case "remove" -> completions.addAll(itemLimitManager.getLimitedItemNames());
+                case "list" -> {
+                    int totalPages = (int) Math.ceil(itemLimitManager.getLimitedItemCount() / 10.0);
+                    for (int i = 1; i <= Math.min(totalPages, 5); i++) {
+                        completions.add(String.valueOf(i));
+                    }
                 }
-            } else if (args[0].equalsIgnoreCase("nested")) {
-                completions.addAll(Arrays.asList("on", "off"));
-            } else if (args[0].equalsIgnoreCase("info")) {
-                Bukkit.getOnlinePlayers().forEach(p -> completions.add(p.getName()));
+                case "containers", "nested" -> completions.addAll(List.of("on", "off"));
+                case "info" -> Bukkit.getOnlinePlayers().forEach(p -> completions.add(p.getName()));
+                default -> { }
             }
         } else if (args.length == 3 && args[0].equalsIgnoreCase("add")) {
-            // Suggest common quantities
-            completions.addAll(Arrays.asList("0", "1", "8", "16", "32", "64"));
+            completions.addAll(List.of("0", "1", "8", "16", "32", "64"));
         }
 
+        String prefix = args[args.length - 1].toLowerCase(Locale.ROOT);
         return completions.stream()
-                .filter(s -> s.toLowerCase().startsWith(args[args.length - 1].toLowerCase()))
-                .collect(Collectors.toList());
+                .filter(s -> s.toLowerCase(Locale.ROOT).startsWith(prefix))
+                .toList();
     }
 }
