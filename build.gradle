@@ -1,55 +1,58 @@
 plugins {
-    id 'java'
-    id("xyz.jpenilla.run-paper") version "2.3.1"
+    id 'java-library'
+    id 'com.gradleup.shadow' version '9.0.0'
+    id 'xyz.jpenilla.run-paper' version '3.1.0'
 }
-
-group = 'net.saturn'
-version = '1.2.2-SNAPSHOT'
 
 repositories {
     mavenCentral()
+
     maven {
-        name = "papermc-repo"
-        url = "https://repo.papermc.io/repository/maven-public/"
+        url = 'https://repo.papermc.io/repository/maven-public/'
+    }
+
+    maven {
+        url = 'https://repo.codemc.io/repository/maven-releases/'
+    }
+
+    maven {
+        url = 'https://repo.codemc.io/repository/maven-snapshots/'
     }
 }
 
 dependencies {
-    compileOnly("io.papermc.paper:paper-api:1.21.11-R0.1-SNAPSHOT")
+    compileOnly 'io.papermc.paper:paper-api:26.2.build.129-stable'
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(25)
+    }
 }
 
 tasks {
+    shadowJar {
+        archiveClassifier.set('')
+        duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+        minimize()
+        mergeServiceFiles()
+    }
+
+    jar {
+        enabled = false
+    }
+
     runServer {
-        // Configure the Minecraft version for our task.
-        // This is the only required configuration besides applying the plugin.
-        // Your plugin's jar (or shadowJar if present) will be used automatically.
-        minecraftVersion("1.21.11")
+        enabled = true
+        minecraftVersion('26.2')
+        jvmArgs('-Xms1G', '-Xmx1G')
     }
-}
 
-def targetJavaVersion = 21
-java {
-    def javaVersion = JavaVersion.toVersion(targetJavaVersion)
-    sourceCompatibility = javaVersion
-    targetCompatibility = javaVersion
-    if (JavaVersion.current() < javaVersion) {
-        toolchain.languageVersion = JavaLanguageVersion.of(targetJavaVersion)
-    }
-}
+    processResources {
+        def props = [version: version]
 
-tasks.withType(JavaCompile).configureEach {
-    options.encoding = 'UTF-8'
-
-    if (targetJavaVersion >= 10 || JavaVersion.current().isJava10Compatible()) {
-        options.release.set(targetJavaVersion)
-    }
-}
-
-processResources {
-    def props = [version: version]
-    inputs.properties props
-    filteringCharset 'UTF-8'
-    filesMatching('plugin.yml') {
-        expand props
+        filesMatching('paper-plugin.yml') {
+            expand(props)
+        }
     }
 }
