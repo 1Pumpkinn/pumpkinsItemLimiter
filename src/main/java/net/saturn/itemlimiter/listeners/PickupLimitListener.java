@@ -29,6 +29,7 @@ public class PickupLimitListener implements Listener {
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onPickup(EntityPickupItemEvent event) {
         if (!(event.getEntity() instanceof Player player)) return;
+        if (itemLimitManager.isExempt(player)) return;
 
         ItemStack stack = event.getItem().getItemStack();
         Material material = stack.getType();

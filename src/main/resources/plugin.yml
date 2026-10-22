@@ -17,3 +17,9 @@ permissions:
   itemlimiter.admin:
     description: Allows use of admin commands
     default: op
+  itemlimiter.off:
+    description: Item limits do NOT affect this player (give to staff groups)
+    default: false
+  itemlimiter.on:
+    description: Item limits affect this player (granted to everyone by default)
+    default: true

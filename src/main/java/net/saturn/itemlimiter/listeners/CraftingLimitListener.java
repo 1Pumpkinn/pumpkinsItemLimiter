@@ -50,6 +50,7 @@ public class CraftingLimitListener implements Listener {
     @EventHandler
     public void onPrepareCraft(PrepareItemCraftEvent event) {
         if (event.getRecipe() == null) return;
+        if (isExempt(event.getView().getPlayer())) return;
 
         if (isBannedResult(event.getRecipe().getResult())) {
             event.getInventory().setResult(null);
@@ -58,6 +59,7 @@ public class CraftingLimitListener implements Listener {
 
     @EventHandler
     public void onPrepareSmithing(PrepareSmithingEvent event) {
+        if (isExempt(event.getView().getPlayer())) return;
         if (isBannedResult(event.getResult())) {
             event.setResult(null);
         }
@@ -75,6 +77,10 @@ public class CraftingLimitListener implements Listener {
         plugin.getServer().getScheduler().runTask(plugin, () -> {
             if (player.isOnline()) excessEnforcer.checkAndDropAllExcess(player);
         });
+    }
+
+    private boolean isExempt(HumanEntity human) {
+        return human instanceof Player player && itemLimitManager.isExempt(player);
     }
 
     private boolean isBannedResult(ItemStack result) {

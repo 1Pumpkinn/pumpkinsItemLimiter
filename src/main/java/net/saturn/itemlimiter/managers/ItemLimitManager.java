@@ -28,6 +28,11 @@ import java.util.Set;
 
 public class ItemLimitManager {
 
+    /** Players with this permission are never affected by item limits. */
+    public static final String PERM_OFF = "itemlimiter.off";
+    /** Players with this permission are affected by item limits (granted by default). */
+    public static final String PERM_ON = "itemlimiter.on";
+
     private static final String LIMITS_PATH = "limited-items";
     private static final String CONTAINER_SETTING = "settings.count-items-in-containers";
     /** Pre-rename key; migrated to {@link #CONTAINER_SETTING} on load. */
@@ -174,6 +179,23 @@ public class ItemLimitManager {
 
     public boolean hasLimitedItems() {
         return !limitedItems.isEmpty();
+    }
+
+    // ------------------------------------------------------------------
+    // Per-player exemption (LuckPerms groups etc.)
+    // ------------------------------------------------------------------
+
+    /**
+     * Whether item limits are ignored for this player.
+     * <ul>
+     *   <li>{@code itemlimiter.off} -> exempt. This always wins, so a staff group
+     *       can set it even if it inherits {@code itemlimiter.on} from "default".</li>
+     *   <li>{@code itemlimiter.on} (true by default) set to false -> exempt.</li>
+     *   <li>Otherwise limits apply. Being op does NOT exempt anyone by itself.</li>
+     * </ul>
+     */
+    public boolean isExempt(Player player) {
+        return player.hasPermission(PERM_OFF) || !player.hasPermission(PERM_ON);
     }
 
     // ------------------------------------------------------------------

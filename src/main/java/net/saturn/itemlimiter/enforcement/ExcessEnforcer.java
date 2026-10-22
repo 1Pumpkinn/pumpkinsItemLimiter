@@ -30,6 +30,7 @@ public class ExcessEnforcer {
      */
     public void checkAndDropAllExcess(Player player) {
         if (!itemLimitManager.hasLimitedItems()) return;
+        if (itemLimitManager.isExempt(player)) return;
 
         Map<Material, Integer> counts = itemLimitManager.countLimitedItems(player);
         if (counts.isEmpty()) return;

@@ -355,6 +355,9 @@ public class ItemLimitCommand implements CommandExecutor, TabCompleter {
         }
 
         sender.sendMessage(colorize("&6&m----------&r &e&lLimits for " + target.getName() + " &6&m----------"));
+        if (itemLimitManager.isExempt(target)) {
+            sender.sendMessage(colorize("&b" + target.getName() + " is EXEMPT from limits &7(itemlimiter.off)"));
+        }
 
         boolean any = false;
         List<Material> sorted = new ArrayList<>(limitedItems.keySet());

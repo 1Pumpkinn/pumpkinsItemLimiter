@@ -34,6 +34,9 @@ public class VillagerTradeListener implements Listener {
         }
 
         Player player = (Player) event.getWhoClicked();
+        if (itemLimitManager.isExempt(player)) {
+            return;
+        }
 
         // Check if clicking the result slot (slot 2 in merchant inventory)
         if (event.getRawSlot() != 2) {

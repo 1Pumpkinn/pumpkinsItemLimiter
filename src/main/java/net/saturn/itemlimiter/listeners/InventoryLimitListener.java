@@ -39,6 +39,7 @@ public class InventoryLimitListener implements Listener {
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onHandSwap(PlayerSwapHandItemsEvent event) {
         Player player = event.getPlayer();
+        if (itemLimitManager.isExempt(player)) return;
         ItemStack offHandItem = event.getOffHandItem();
         ItemStack mainHandItem = event.getMainHandItem();
 
@@ -67,6 +68,7 @@ public class InventoryLimitListener implements Listener {
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onInventoryClick(InventoryClickEvent event) {
         if (!(event.getWhoClicked() instanceof Player player)) return;
+        if (itemLimitManager.isExempt(player)) return;
         if (event.getInventory().getType() == InventoryType.CREATIVE) return;
 
         Inventory clicked = event.getClickedInventory();
@@ -202,6 +204,7 @@ public class InventoryLimitListener implements Listener {
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onInventoryDrag(InventoryDragEvent event) {
         if (!(event.getWhoClicked() instanceof Player player)) return;
+        if (itemLimitManager.isExempt(player)) return;
 
         ItemStack draggedItem = event.getOldCursor();
         if (draggedItem == null || draggedItem.getType() == Material.AIR) return;
@@ -251,6 +254,7 @@ public class InventoryLimitListener implements Listener {
     public void onShiftClick(InventoryClickEvent event) {
         if (event.getClick() != ClickType.SHIFT_LEFT && event.getClick() != ClickType.SHIFT_RIGHT) return;
         if (!(event.getWhoClicked() instanceof Player player)) return;
+        if (itemLimitManager.isExempt(player)) return;
 
         ItemStack clicked = event.getCurrentItem();
         if (clicked == null || clicked.getType() == Material.AIR) return;
@@ -319,6 +323,7 @@ public class InventoryLimitListener implements Listener {
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onInventoryClose(InventoryCloseEvent event) {
         if (!(event.getPlayer() instanceof Player player)) return;
+        if (itemLimitManager.isExempt(player)) return;
 
         ItemStack cursor = player.getItemOnCursor();
         Material material = (cursor == null || cursor.getType() == Material.AIR) ? null : cursor.getType();
@@ -358,6 +363,7 @@ public class InventoryLimitListener implements Listener {
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onDrop(PlayerDropItemEvent event) {
         Player player = event.getPlayer();
+        if (itemLimitManager.isExempt(player)) return;
 
         ItemStack cursor = player.getItemOnCursor();
         if (cursor == null || cursor.getType() == Material.AIR) return;
