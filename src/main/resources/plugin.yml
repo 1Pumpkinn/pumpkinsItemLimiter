@@ -1,7 +1,7 @@
 name: ItemLimit
 version: '${version}'
 main: net.saturn.itemlimiter.ItemLimiter
-api-version: '26.2'
+api-version: '1.21.11'
 load: STARTUP
 authors: [PumpkinDev]
 description: A minecraft plugin that let's you limit any item in the players inventory, bundles and shulkers.
